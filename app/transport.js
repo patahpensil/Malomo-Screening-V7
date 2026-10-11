@@ -110,5 +110,31 @@
     return {prices,watchdog,isLive:()=>!!sock&&sock.readyState===1&&last>0&&now()-last<20000,
       stop(){stopped=true;clearTimer(timer);if(sock){const w=sock;sock=null;try{w.close();}catch{/* sudah tertutup */}}},_delay:()=>delay};
   }
-  return {REST,WS,RETRY_DELAYS,createTransport,withRetry,createTicker};
+  /* Stream semua pair (PRD v1.0.13 R35): !ticker@arr di /market — statistik 24 jam BERJALAN, dikirim tiap ±1 detik hanya
+     untuk pair yang berubah. Satu koneksi memberi harga terakhir + quote volume 24 jam seluruh pair, untuk ranking universe
+     realtime dan harga kartu Decision. Snapshot awal dari REST /fapi/v1/ticker/24hr (seed). Watchdog & reconnect sama. */
+  function createMarketTicker({onUpdate,WebSocketImpl=typeof WebSocket!=='undefined'?WebSocket:null,now=()=>Date.now(),setTimer=setTimeout,clearTimer=clearTimeout,base=WS}={}){
+    const tickers={};let sock=null,last=0,opened=0,delay=2000,timer=null,stopped=false;
+    const put=(sym,price,changePct,quoteVolume,at)=>{if(!sym||!(price>0))return;tickers[sym]={price,changePct,quoteVolume:Number.isFinite(quoteVolume)?quoteVolume:(tickers[sym]&&tickers[sym].quoteVolume),at};};
+    function seed(rows){const t=now();for(const r of Array.isArray(rows)?rows:[])put(r.symbol,Number(r.lastPrice),Number(r.priceChangePercent),Number(r.quoteVolume),t);}
+    function connect(){
+      if(stopped||!WebSocketImpl)return;
+      let w;try{w=new WebSocketImpl(base+'/market/stream?streams=!ticker@arr');}catch{schedule();return;}
+      sock=w;last=0;opened=now();
+      w.onopen=()=>{delay=2000;};
+      w.onmessage=e=>{
+        try{const m=JSON.parse(e.data),d=m&&m.data;if(!Array.isArray(d))return;last=now();
+          for(const x of d)put(x.s,Number(x.c),Number(x.P),Number(x.q),last);onUpdate&&onUpdate(d.length);}
+        catch{/* pesan rusak tidak mengubah data */}
+      };
+      w.onerror=()=>{try{w.close();}catch{/* sudah tertutup */}};
+      w.onclose=()=>{if(sock!==w)return;sock=null;schedule();};
+    }
+    function schedule(){if(stopped)return;clearTimer(timer);timer=setTimer(connect,delay);delay=Math.min(delay*1.6,30000);}
+    function watchdog(){if(!sock||sock.readyState!==1)return;const idle=last?now()-last:now()-opened;if(idle>20000){try{sock.close();}catch{/* sudah tertutup */}}}
+    connect();
+    return {tickers,prices:tickers,seed,watchdog,isLive:()=>!!sock&&sock.readyState===1&&last>0&&now()-last<20000,
+      stop(){stopped=true;clearTimer(timer);if(sock){const w=sock;sock=null;try{w.close();}catch{/* sudah tertutup */}}},_delay:()=>delay};
+  }
+  return {REST,WS,RETRY_DELAYS,createTransport,withRetry,createTicker,createMarketTicker};
 });

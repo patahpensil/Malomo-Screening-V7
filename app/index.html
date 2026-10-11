@@ -17,12 +17,10 @@
 <div class="app" id="app">
   <nav class="rail" id="rail" aria-label="Navigasi utama">
     <div class="brand" title="Malomo Screening V7"><span class="brand-mark">M</span><span class="brand-text">Malomo V7</span></div>
-    <a class="nav-item" href="#siklus" data-screen="siklus"><span class="ico" aria-hidden="true">◷</span><span class="lbl">Siklus 4H</span></a>
-    <a class="nav-item" href="#event" data-screen="event"><span class="ico" aria-hidden="true">▤</span><span class="lbl">Papan Event</span></a>
-    <a class="nav-item" href="#portofolio" data-screen="portofolio"><span class="ico" aria-hidden="true">◫</span><span class="lbl">Portofolio Simulasi</span></a>
-    <a class="nav-item" href="#pasar" data-screen="pasar"><span class="ico" aria-hidden="true">▦</span><span class="lbl">Konteks Pasar</span></a>
-    <a class="nav-item" href="#audit" data-screen="audit"><span class="ico" aria-hidden="true">✓</span><span class="lbl">Audit &amp; Data</span></a>
-    <div class="rail-foot">Riset saja.<br>Tanpa order.</div>
+    <a class="nav-item" href="#decision" data-screen="decision"><span class="ico" aria-hidden="true">◎</span><span class="lbl">Decision</span></a>
+    <a class="nav-item" href="#pairs" data-screen="pairs"><span class="ico" aria-hidden="true">▦</span><span class="lbl">Semua Pair</span></a>
+    <a class="nav-item" href="#jurnal" data-screen="jurnal"><span class="ico" aria-hidden="true">▤</span><span class="lbl">Jurnal</span></a>
+    <div class="rail-foot">Tanpa order.<br>Bukan saran transaksi.</div>
   </nav>
   <div class="main">
     <header class="cyclebar" id="cyclebar" aria-live="polite">
@@ -30,20 +28,17 @@
         <div class="cb-clock"><span class="muted">Close berikutnya</span> <b id="nextClose">—</b> <span class="mono" id="countdown">—</span></div>
         <div class="cb-health" id="health"><span class="dot neutral"></span><span>Memuat data…</span></div>
       </div>
-      <ol class="stepper" id="stepper" aria-label="Tahap pipeline PRD §9"></ol>
+      <div class="cb-universe" id="universe"></div>
     </header>
-    <div class="workspace">
+    <div class="workspace no-insp">
       <main class="content" id="content" tabindex="-1"></main>
-      <aside class="inspector" id="inspector" aria-label="Inspektor kandidat" hidden></aside>
     </div>
-    <footer class="footnote">Skor M6 adalah indeks desain 0–500, bukan peluang menang. Riset saja, bukan saran transaksi. Data publik Binance USDⓈ-M, candle 4H, waktu UTC.</footer>
+    <footer class="footnote">Skor M6 adalah indeks desain 0–500, bukan peluang menang. Bukan saran transaksi. Data publik Binance USDⓈ-M, candle 4H, waktu UTC + WITA.</footer>
   </div>
   <nav class="tabbar" aria-label="Navigasi bawah">
-    <a href="#siklus" data-screen="siklus"><span aria-hidden="true">◷</span>Siklus</a>
-    <a href="#event" data-screen="event"><span aria-hidden="true">▤</span>Event</a>
-    <a href="#portofolio" data-screen="portofolio"><span aria-hidden="true">◫</span>Portofolio</a>
-    <a href="#pasar" data-screen="pasar"><span aria-hidden="true">▦</span>Pasar</a>
-    <a href="#audit" data-screen="audit"><span aria-hidden="true">✓</span>Audit</a>
+    <a href="#decision" data-screen="decision"><span aria-hidden="true">◎</span>Decision</a>
+    <a href="#pairs" data-screen="pairs"><span aria-hidden="true">▦</span>Semua Pair</a>
+    <a href="#jurnal" data-screen="jurnal"><span aria-hidden="true">▤</span>Jurnal</a>
   </nav>
 </div>
 <script src="engine/core.js"></script>
@@ -58,6 +53,7 @@
 <script src="live.js"></script>
 <script src="exec.js"></script>
 <script src="universe.js"></script>
+<script src="ledger.js"></script>
 <script src="ui.js"></script>
 <script src="main.js"></script>
 </body>

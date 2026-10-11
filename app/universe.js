@@ -1,4 +1,5 @@
-/* Malomo V7 — Universe dinamis 100 pair (PRD v1.0.12 R34). Fungsi murni, tanpa DOM/jaringan.
+/* Malomo V7 — Universe dinamis 100 pair (PRD v1.0.12 R34; sejak v1.0.13 R35 ranking realtime volume 24 jam berjalan).
+   Fungsi murni, tanpa DOM/jaringan.
    Ranking ditetapkan pada close candle harian 00:00 UTC (08:00 WITA) = volume quote (USDT) candle harian yang baru close,
    untuk kontrak USDT perpetual berstatus TRADING (stablecoin & indeks dikeluarkan). Daftar berlaku sampai close harian
    berikutnya. Hard gate: hanya pair dalam daftar yang boleh menghasilkan keputusan; rumus & bobot M1–M6 tidak berubah.
@@ -47,5 +48,11 @@
   }
   /* Validasi universe tersimpan: hari yang sama → dipakai ulang tanpa unduh ulang. */
   function isFor(u,dayStart){return !!(u&&u.dayStart===dayStart&&Array.isArray(u.list)&&u.list.length&&u.list.every(x=>x&&typeof x.symbol==='string'&&Number.isInteger(x.rank)));}
-  return {DAY,SIZE,POOL,STABLE,dayStartOf,eligible,pool,dailyQuoteVolume,rank,isFor};
+  /* R35 (v1.0.13): ranking realtime dari quote volume 24 jam BERJALAN (stream !ticker@arr / REST ticker/24hr).
+     tickers: {SYMBOL:{quoteVolume}}; hanya simbol eligible; urut volume ↓, seri → simbol ↑; ambil SIZE teratas. */
+  function rankRolling(tickers,eligibleList,n=SIZE){
+    const v={};for(const s of eligibleList){const t=tickers&&tickers[s];if(t&&Number.isFinite(t.quoteVolume)&&t.quoteVolume>=0)v[s]=t.quoteVolume;}
+    return rank(v,n);
+  }
+  return {DAY,SIZE,POOL,STABLE,dayStartOf,eligible,pool,dailyQuoteVolume,rank,rankRolling,isFor};
 });

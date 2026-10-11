@@ -82,6 +82,16 @@ async function engineStep(raw,now){
       return C.PAIRS.map(s=>s+' '+tk.prices[s].price).join(', ');
     }finally{tk.stop();}
   });
+  await step('WebSocket semua pair (/market !ticker@arr, R35): volume 24 jam berjalan → universe 100 pair',async()=>{
+    const UV=require('../app/universe');const ei=await tr.exchangeInfo(),elig=UV.eligible(ei);
+    const mk=Tr.createMarketTicker({onUpdate:()=>{}});
+    try{
+      await wait(()=>Object.keys(mk.tickers).length>=100,30000,'!ticker@arr ≥100 pair');
+      const u=UV.rankRolling(mk.tickers,elig);assert.equal(u.length,100,'universe '+u.length);
+      for(const s of ['BTCUSDT','ETHUSDT'])assert(u.some(x=>x.symbol===s),s+' tidak di 100 besar');
+      return Object.keys(mk.tickers).length+' pair di stream · #1 '+u[0].symbol+' · #100 '+u[99].symbol;
+    }finally{mk.stop();}
+  });
   await step('WebSocket posisi: aggTrade (/market → CVD) dan depth20 (/public → orderbook)',async()=>{
     const lv=Lv.createLive({openInterest:s=>tr.openInterest(s)});
     try{

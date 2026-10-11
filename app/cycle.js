@@ -60,7 +60,8 @@
     }
     // Pair yang gagal diambil dan datanya belum mencakup close terakhir → FETCH_FAILED untuk siklus ini.
     const lastCloseOf=s=>{const a=analyses.get(s);return a&&a.c.length?a.c[a.c.length-1].t+H4:null;};
-    const fetchFailed=syms.filter(s=>failed.includes(s)&&!(lastCloseOf(s)>=T));
+    // Termasuk pair yang gagal sejak percobaan pertama (belum punya data sama sekali): tetap FETCH_FAILED (PRD §1).
+    const fetchFailed=[...new Set([...syms,...failed])].filter(s=>failed.includes(s)&&!(lastCloseOf(s)>=T));
     const provider=M2.provider({frozen});
     const closes=P.closesOf(analyses);
     // T yang perlu diputuskan: setiap close yang punya event CONFIRMED + close terakhir.
@@ -114,10 +115,15 @@
     for(const r of book.rejections)for(const x of r.reasons)book.rejectionCounts[x]=(book.rejectionCounts[x]||0)+1;
     // Pair yang ditampilkan: universe hari ini (atau semua bila tanpa gate) + pair posisi berjalan.
     const shown=new Set(gate?[...gate.allowed].filter(s=>analyses.has(s)):syms);for(const p of active)shown.add(p.symbol);
+    // R35 layar Semua Pair: M1 (struktur pair) pada candle close terakhir untuk SETIAP pair yang dianalisis + jumlah setup menunggu.
+    const waitingBy={};for(const p of P.pending(analyses))waitingBy[p.symbol]=(waitingBy[p.symbol]||0)+1;
+    const pairRows=[...analyses].map(([s,a])=>{const k=a.c.length-1,m=k>=0?a.m1At(k):null;
+      return {symbol:s,lastCloseMs:k>=0?a.c[k].t+H4:null,close:k>=0?a.c[k].close:null,m1:m?m.score:null,m1Status:m?m.status:null,
+        direction:m?m.direction:null,structure:m&&m.structure?m.structure.label:null,waiting:waitingBy[s]||0,candles:a.c.length};});
     const extra=[...new Set([...current.records.map(r=>r.symbol),...active.map(p=>p.symbol)])].filter(s=>!pairs.includes(s)).sort();
     return {now,T,cycle,history,book,board:board(analyses,history,T,shown),context:context(analyses,T,pairs,extra),
       health:health(analyses,syms,T,fetchFailed,failed),calibration:calibration(frozen,frozenMeta),log,analyses,
-      universe:gate?{fromMs:gate.fromMs,symbols:[...gate.allowed]}:null,symbols:syms};
+      universe:gate?{fromMs:gate.fromMs,symbols:[...gate.allowed]}:null,symbols:syms,pairRows};
   }
   const firstCandleMs=analyses=>{let m=Infinity;for(const [,a] of analyses)if(a.c.length)m=Math.min(m,a.c[0].t);return fin(m)?m:null;};
 

@@ -35,6 +35,23 @@ test('Batas hari = close harian 00:00 UTC = 08:00 WITA; universe tersimpan hanya
   const u={dayStart:d,list:[{rank:1,symbol:'BTCUSDT'}]};assert(UV.isFor(u,d));assert(!UV.isFor(u,d+DAY));assert(!UV.isFor({dayStart:d,list:[]},d));assert(!UV.isFor(null,d));
 });
 
+test('R35 rankRolling: volume 24 jam berjalan dari stream, hanya eligible, top 100, seri → simbol',()=>{
+  const tk={};for(let i=0;i<120;i++)tk['Q'+String(i).padStart(3,'0')+'USDT']={quoteVolume:5000-i};tk.USDCUSDT={quoteVolume:9e9};tk.NOVOLUSDT={};
+  const elig=Object.keys(tk).filter(s=>s!=='USDCUSDT');
+  const r=UV.rankRolling(tk,elig);assert.equal(r.length,100);assert.equal(r[0].symbol,'Q000USDT');assert(!r.some(x=>x.symbol==='USDCUSDT'||x.symbol==='NOVOLUSDT'));
+  assert.deepEqual(UV.rankRolling({},elig),[]);
+});
+test('R35 stream !ticker@arr: seed REST + pembaruan array, harga & volume, pesan rusak diabaikan, watchdog 20 detik',()=>{
+  const Tr=require('../app/transport');const list=[];let t=1e12;
+  class W{constructor(u){this.url=u;this.readyState=1;list.push(this);}close(){this.readyState=3;this.onclose&&this.onclose();}}
+  const timers=[];const mk=Tr.createMarketTicker({WebSocketImpl:W,now:()=>t,setTimer:(f,ms)=>{timers.push(ms);return 1;},clearTimer:()=>{}});
+  assert(list[0].url.endsWith('/market/stream?streams=!ticker@arr'));
+  mk.seed([{symbol:'AUSDT',lastPrice:'1.5',priceChangePercent:'2',quoteVolume:'1000'}]);assert.deepEqual([mk.tickers.AUSDT.price,mk.tickers.AUSDT.quoteVolume],[1.5,1000]);
+  list[0].onmessage({data:JSON.stringify({stream:'!ticker@arr',data:[{s:'AUSDT',c:'1.6',P:'3',q:'2000'},{s:'BUSDT',c:'0',q:'5'}]})});list[0].onmessage({data:'{rusak'});
+  assert.deepEqual([mk.tickers.AUSDT.price,mk.tickers.AUSDT.quoteVolume],[1.6,2000]);assert(!mk.tickers.BUSDT,'harga 0 diabaikan');assert(mk.isLive());
+  t+=21000;mk.watchdog();assert.equal(list[0].readyState,3);assert.equal(timers[0],2000);mk.stop();
+});
+
 // ---------- gate & invarian skor ----------
 const FROZEN=M2.frozenFrom(JSON.parse(fs.readFileSync(path.join(ROOT,'evidence/frozen_cdf_normalization.json'),'utf8')),JSON.parse(fs.readFileSync(path.join(ROOT,'evidence/frozen_v2_normalizations.json'),'utf8')));
 const CORE=S.generate({n:1600});
@@ -98,6 +115,12 @@ test('toView (Web Worker): angka identik, tanpa fungsi/peta analisis, label rezi
   for(let i=0;i<gated.history.length;i++){assert.deepEqual(cl.history[i],Cy.publicRecord(gated.history[i]));}
   for(const r of gated.history){const rg=Cy.btcRegime(gated.analyses,r);assert.deepEqual(cl.regimes[Cy.recKey(r)]||null,rg);}
   assert.equal(cl.book.active.length,gated.book.active.length);assert.equal(Cy.auditLines(cl),Cy.auditLines(gated));
+});
+test('FETCH_FAILED: pair universe yang gagal sejak percobaan pertama (tanpa data) tetap menahan keputusan close (PRD §1)',()=>{
+  const raw=cand(RAW);delete raw.CCCUSDT;
+  const st=Cy.buildState({rawBySymbol:raw,now:NOW,frozen:FROZEN,symbols:Object.keys(raw),failed:['CCCUSDT'],gate:{fromMs:FROM,allowed}});
+  assert.deepEqual(st.cycle.summary.fetch_failed,['CCCUSDT']);assert.equal(st.cycle.summary.data_status,'DATA_INCOMPLETE');
+  assert(st.cycle.records.every(r=>r.status!=='ENTRY_CONSIDER'),'tidak boleh ada ENTRY_CONSIDER saat data belum lengkap');
 });
 test('mergeCandles: data terbaru menang, urut, dibatasi 1.500; celah tidak diisi',()=>{
   const c=t=>({t,close:t});const old=[c(1),c(2),c(3)],fresh=[{t:3,close:99},c(4)];

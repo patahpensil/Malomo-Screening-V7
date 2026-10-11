@@ -1,12 +1,13 @@
 'use strict';
-/* Uji bug di browser (Chromium headless) sebelum live: situs _site/ dilayani lokal, Binance REST & WebSocket di-mock
-   dengan data sintetis deterministik. Diuji di desktop 1440 px dan mobile 390 px, ditambah skenario FETCH_FAILED dan
-   fase CLOSE_CANDIDATE. Mencakup daftar periksa penerimaan UI/UX §8. */
+/* Uji bug di browser (Chromium headless) sebelum live — PRD v1.0.13 R35 (tiga layar Decision, Semua Pair, Jurnal):
+   situs _site/ dilayani lokal, Binance REST & WebSocket (termasuk !ticker@arr) di-mock dengan data sintetis deterministik.
+   Desktop 1440 px dan mobile 390 px, ditambah skenario FETCH_FAILED, universe gagal, exchangeInfo gagal, CLOSE_CANDIDATE.
+   Angka di layar dibandingkan dengan engine + ledger yang dijalankan di Node atas data yang sama. */
 const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),assert=require('node:assert/strict');
 let pw;try{pw=require(process.env.PLAYWRIGHT_MODULE||'playwright');}catch{pw=require('/opt/npm-tools/node_modules/playwright');}
 const {chromium}=pw;
 const ROOT=path.resolve(__dirname,'..'),SITE=path.join(ROOT,'_site');
-const C=require('../engine/core'),M2=require('../engine/m2'),Cy=require('../app/cycle'),X=require('../app/exec'),UV=require('../app/universe'),S=require('./synthetic');
+const C=require('../engine/core'),M2=require('../engine/m2'),Cy=require('../app/cycle'),X=require('../app/exec'),UV=require('../app/universe'),LG=require('../app/ledger'),S=require('./synthetic');
 const H4=C.H4;
 if(!fs.existsSync(path.join(SITE,'index.html'))){console.error('Jalankan node scripts/build-site.js dulu');process.exit(1);}
 const FROZEN=M2.frozenFrom(JSON.parse(fs.readFileSync(path.join(ROOT,'evidence/frozen_cdf_normalization.json'),'utf8')),JSON.parse(fs.readFileSync(path.join(ROOT,'evidence/frozen_v2_normalizations.json'),'utf8')));
@@ -21,12 +22,16 @@ const DAILY_VOL=Object.fromEntries(SYMS.map((s,i)=>[s,1e9-i*1e7]));DAILY_VOL.USD
 const lastOpen=RAW.BTCUSDT[RAW.BTCUSDT.length-1][0];
 const full=Cy.buildState({rawBySymbol:Object.fromEntries(Object.entries(RAW).map(([s,r])=>[s,r.map(Cy.toCandle)])),now:lastOpen+10000,frozen:FROZEN,symbols:SYMS});
 const byT=new Map();for(const r of full.history){const k=Date.parse(r.decision_available_utc);if(!byT.has(k))byT.set(k,[]);byT.get(k).push(r.status);}
-// close dengan ENTRY_CONSIDER (berada di urutan pertama tabel) + REJECTED_RISK
-const T=[...byT.entries()].filter(([,v])=>v[0]==='ENTRY_CONSIDER'&&v.includes('REJECTED_RISK')).map(([k])=>k).pop();
+// close dengan ENTRY_CONSIDER + REJECTED_RISK (Decision baru + penolakan risiko pada close yang sama)
+const T=[...byT.entries()].filter(([,v])=>v.includes('ENTRY_CONSIDER')&&v.includes('REJECTED_RISK')).map(([k])=>k).pop();
 const NOW=T+10000;
 const UNIVERSE=UV.rank(Object.fromEntries(SYMS.map(s=>[s,DAILY_VOL[s]])));
-const expect=Cy.buildState({rawBySymbol:Object.fromEntries(Object.entries(RAW).map(([s,r])=>[s,r.filter(k=>k[0]<=NOW).slice(-1500).map(Cy.toCandle)])),now:NOW,frozen:FROZEN,
-  symbols:SYMS,gate:{fromMs:UV.dayStartOf(NOW),allowed:new Set(UNIVERSE.map(x=>x.symbol))}});
+const CANDLES=Object.fromEntries(Object.entries(RAW).map(([s,r])=>[s,r.filter(k=>k[0]<=NOW).slice(-1500).map(Cy.toCandle)]));
+const expect=Cy.buildState({rawBySymbol:CANDLES,now:NOW,frozen:FROZEN,symbols:SYMS,gate:{fromMs:T,allowed:new Set(UNIVERSE.map(x=>x.symbol))}});
+const VIEW=Cy.toView(expect);
+const LEDGER=LG.freeze(LG.empty(),VIEW.history,{regimes:VIEW.regimes,ranks:Object.fromEntries(UNIVERSE.map(x=>[x.symbol,x.rank])),currentT:T,now:NOW}).ledger;
+LG.resolve(LEDGER,CANDLES,NOW);
+const ACTIVE=LG.active(LEDGER,NOW),FINISHED=LG.finished(LEDGER);
 const coreOnly=Cy.buildState({rawBySymbol:Object.fromEntries(C.PAIRS.map(s=>[s,RAW[s].filter(k=>k[0]<=NOW).slice(-1500).map(Cy.toCandle)])),now:NOW,frozen:FROZEN});
 
 // exchangeInfo tiruan (format resmi: filter terpisah) untuk rencana siap salin R32.
@@ -36,7 +41,7 @@ const EI={symbols:[...SYMS,'USDCUSDT','OLDUSDT'].map(s=>({symbol:s,contractType:
 const RULES=X.parseRules(EI,SYMS);for(const x of UNIVERSE)RULES[x.symbol].rank=x.rank;
 const DAY=UV.DAY,DAYSTART=UV.dayStartOf(NOW);
 const dailyRows=s=>[[DAYSTART-2*DAY,1,1,1,1,1,DAYSTART-DAY-1,String(DAILY_VOL[s]*0.9)],[DAYSTART-DAY,1,1,1,1,1,DAYSTART-1,String(DAILY_VOL[s])],[DAYSTART,1,1,1,1,1,DAYSTART+DAY-1,'5']];
-const TICKER=[...SYMS,'USDCUSDT','OLDUSDT'].map(s=>({symbol:s,quoteVolume:String(DAILY_VOL[s])}));
+const TICKER=[...SYMS,'USDCUSDT','OLDUSDT'].map(s=>({symbol:s,quoteVolume:String(DAILY_VOL[s]),lastPrice:String(RAW[s]?RAW[s].find(k=>k[0]===T)[4]:1),priceChangePercent:'0.5'}));
 const isMultiple=(str,step)=>{const dec=Math.max((str.split('.')[1]||'').length,(step.split('.')[1]||'').length),toInt=v=>{const [a,b='']=v.split('.');return BigInt(a+b.padEnd(dec,'0'));};return toInt(str)%toInt(step)===0n;};
 const OUTSIDE=[];   // permintaan candle untuk pair di luar universe (harus kosong)
 const TYPES={'.html':'text/html','.js':'application/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.webmanifest':'application/manifest+json'};
@@ -62,9 +67,11 @@ async function setup(browser,viewport,{failSymbol=null,noForming=false,eiFail=fa
           if(u.includes(l+'@ticker'))send(l+'@ticker',{s,c:String(p),P:'0.5'});
           if(u.includes(l+'@aggTrade'))send(l+'@aggTrade',{s,p:String(p),q:'2',m:false,T:Date.now()});
           if(u.includes(l+'@depth20'))send(l+'@depth20@500ms',{s,b:[[String(p*0.999),'5']],a:[[String(p*1.001),'3']]});}
+        if(u.includes('!ticker@arr'))send('!ticker@arr',Object.entries(prices).map(([s,p])=>({e:'24hrTicker',s,c:String(p),P:'0.5',q:String(window.__vol[s])})));
         this._t=setTimeout(()=>this.pump(),500);}
       close(){if(this.readyState===3)return;this.readyState=3;clearTimeout(this._t);this.onclose&&this.onclose();}send(){}};
   },Object.fromEntries(Object.entries(RAW).map(([s,r])=>[s,r.find(k=>k[0]===T)[4]])));
+  await page.addInitScript(v=>{window.__vol=v;},DAILY_VOL);
   await page.route(/fonts\.(googleapis|gstatic)\.com/,r=>r.abort());
   await page.route('https://fapi.binance.com/**',async route=>{
     const u=new URL(route.request().url());
@@ -82,7 +89,7 @@ async function setup(browser,viewport,{failSymbol=null,noForming=false,eiFail=fa
     }
     return route.fulfill({status:404,body:'not mocked'});
   });
-  await page.goto('http://127.0.0.1:'+server.address().port+'/#siklus');
+  await page.goto('http://127.0.0.1:'+server.address().port+'/#decision');
   return {context,page,errors};
 }
 async function common(page,viewport){
@@ -99,195 +106,132 @@ const nav=async(page,viewport,screen)=>{await page.locator((viewport.width<768?'
 
 (async()=>{
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
-  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||(fs.existsSync('/opt/pw-browsers/chromium')?undefined:undefined),args:['--no-sandbox']});
+  const browser=await chromium.launch({headless:true,args:['--no-sandbox']});
   let pass=0;const fails=[];
   const run=async(name,fn)=>{try{await fn();pass++;console.log('PASS '+name);}catch(e){const msg=String(e.message).split('\n')[0];fails.push(name+' — '+msg);console.log('FAIL '+name+' — '+msg);}};
-  const recsT=expect.cycle.records;
+  const SET={capital:'2500',riskPct:'0.75',costBps:'18'};
   try{
+    assert(ACTIVE.length>0&&FINISHED.length>20,'skenario harus punya Decision aktif & jurnal ('+ACTIVE.length+'/'+FINISHED.length+')');
     for(const viewport of [{width:1440,height:1000},{width:390,height:844}]){
       const mob=viewport.width<768;
       const {context,page,errors}=await setup(browser,viewport);
-      await run(`[${viewport.width}px] Siklus 4H: ringkasan & kandidat sama dengan engine`,async()=>{
-        await page.waitForSelector('[data-count="ENTRY_CONSIDER"]',{timeout:20000});
-        const n=k=>page.locator(`[data-count="${k}"] .v`).innerText();
-        const cnt=s=>recsT.filter(r=>r.status===s).length;
-        assert.equal(Number(await n('ENTRY_CONSIDER')),cnt('ENTRY_CONSIDER'));assert.equal(Number(await n('REJECTED_RISK')),cnt('REJECTED_RISK'));
-        assert.equal(Number(await n('REJECTED_DIRECTION')),cnt('REJECTED_DIRECTION'));
-        const sel=mob?'.cand-cards .cand-card':'.cand-table tbody tr';
-        assert.equal(await page.locator(sel).count(),recsT.length);
-        const first=recsT[0];assert.equal(first.status,'ENTRY_CONSIDER');
-        const txt=await page.locator(sel).first().innerText();assert(txt.includes(first.symbol)&&txt.includes(first.side));
-        assert(txt.includes(C.display2(first.scores.m6_confluense_500).toFixed(2)+' / 500'),'M6 tidak sesuai engine');
-        if(!mob){const head=await page.locator('.cand-table thead').innerText();for(const h of ['#','Pair','Arah','Keluarga','M6 (indeks)','M1 + M2q','Status','Rezim BTC','Alasan','Waktu'])assert(head.includes(h),h);}
-        const rej=page.locator(sel).filter({hasText:'Ditolak: risiko'}).first();assert((await rej.innerText()).includes('— / 500'));
-        assert(await rej.locator('.bar.null').count()===1,'bar null harus diarsir');
-        const clock=await page.locator('#cyclebar').innerText();assert(/UTC · \d\d:\d\d WITA/.test(clock));assert(clock.includes('Data lengkap'));
-        // R34: universe tampil, stablecoin & pair SETTLING tersaring, kandidat pair tambahan ikut dihitung
+      await run(`[${viewport.width}px] Decision: kartu = ledger engine (hard gate), skor dikunci tampil, status & universe`,async()=>{
+        await page.waitForSelector('#dec-list .dec-card',{timeout:30000});
+        const keys=await page.locator('#dec-list .dec-card').evaluateAll(n=>n.map(x=>x.dataset.dec));
+        assert.deepEqual(keys,ACTIVE.map(x=>x.key));
+        for(let i=0;i<ACTIVE.length;i++){const en=ACTIVE[i],card=page.locator('#dec-list .dec-card').nth(i);
+          assert.equal(await card.locator('[data-score="m6"]').innerText(),C.display2(en.scores.m6).toFixed(2)+' / 500');
+          assert.equal(await card.locator('[data-score="m1m2q"]').innerText(),C.display2(en.scores.m1m2q).toFixed(2)+' / 180');
+          const t=await card.innerText();for(const k of ['skor dikunci','OPEN INTEREST','CVD (TAKER)','ORDERBOOK','INVALIDASI','Rencana siap salin'])assert(t.includes(k),'kartu tanpa '+k);}
+        assert.equal(await page.locator('#dec-list [data-exec-status="NEED_SETTINGS"]').count(),ACTIVE.length);
+        assert((await page.locator('#health').innerText()).includes('Data lengkap'));
         assert.equal(await page.locator('[data-universe]').getAttribute('data-universe'),String(UNIVERSE.length));
-        assert((await page.locator('[data-universe]').innerText()).includes('08:00 WITA'));
-        const all=await page.locator(sel).allInnerTexts();assert(!all.some(t=>/USDCUSDT|OLDUSDT/.test(t)));
-        if(recsT.some(r=>!C.PAIRS.includes(r.symbol)))assert(all.some(t=>/(AAA|BBB|CCC|DDD|EEE|FFF)USDT/.test(t)),'kandidat pair tambahan tidak tampil');
-        assert(all.every(t=>/#\d+/.test(t)),'peringkat volume tidak tampil');
+        await page.waitForFunction(()=>!/menyambung|memuat/.test(document.querySelector('#dec-list .dec-card .dec-data').innerText),null,{timeout:20000});
+        assert(/[+−-]?\d+\.\d\dR/.test(await page.locator('#dec-list .dec-card').first().innerText()),'R live tidak tampil');
         await common(page,viewport);
       });
-      await run(`[${viewport.width}px] Inspektor: Skor/Rencana/Audit/JSON + versi selalu terlihat`,async()=>{
-        await page.locator(mob?'.cand-card':'.cand-table tbody tr').first().click();
-        const insp=page.locator('#inspector');await insp.waitFor({state:'visible'});
-        let t=await insp.innerText();
-        for(const s of ['M6 CONFLUENSE (indeks)','bukan win rate','M1 Struktur','M2 Kualitas','M2 Integritas','M3 Dependensi','M4 Risiko','M5 Validasi','Bukan lima bukti independen','risk_mandate_version RESEARCH_1_3_1X_V1','m5_snapshot M5_AUDIT_2024_CLOSED_BAR_9BPS_V1','normalization_version'])assert(t.includes(s),'Skor tanpa: '+s);
-        await insp.locator('[data-tab="rencana"]').click();t=await insp.innerText();
-        for(const s of ['Entry referensi (open)','Stop','Target (2R)','Invalidasi','slot lepas','ATR entry (candle konfirmasi)','ATR frozen (sebelum break)','bukan harga order','Rencana siap salin','Isi modal'])assert(t.includes(s),'Rencana tanpa: '+s);
-        await insp.locator('[data-tab="audit"]').click();t=await insp.innerText();
-        for(const s of ['event_status','score_status','status','Timeline','Konfirmasi','Cek konflik (conflict4)','UNIQUE'])assert(t.includes(s),'Audit tanpa: '+s);
-        await insp.locator('[data-tab="json"]').click();
-        const j=JSON.parse(await insp.locator('#jsonText').innerText());
-        assert.equal(j.schema,'PRD_M1_M6_CONFLUENSE_V1');assert.equal(j.status,'ENTRY_CONSIDER');assert.equal(j.research_only,true);assert(!Object.keys(j).some(k=>k.startsWith('_')));
-        const [dl]=await Promise.all([page.waitForEvent('download'),insp.locator('[data-action="download-json"]').click()]);assert(dl.suggestedFilename().endsWith('.json'));
-        // Kandidat ditolak: M6 null, alasan berlabel.
-        await insp.locator('[data-action="close-insp"]').click();await insp.waitFor({state:'hidden'});
-        await page.locator(mob?'.cand-card':'.cand-table tbody tr').filter({hasText:'Ditolak: risiko'}).first().click();
-        t=await insp.innerText();assert(t.includes('— / 500')&&t.includes('bukan 0'),'M6 ditolak harus null');assert(t.includes('M4 (audit parsial)'));
-        await common(page,viewport);
-        await page.keyboard.press('Escape');await insp.waitFor({state:'hidden'});
+      await run(`[${viewport.width}px] Rencana siap salin: isi modal → angka = exec engine, kelipatan tick, tersimpan`,async()=>{
+        const f=page.locator('.exec-form');if(!(await f.evaluate(el=>el.open)))await f.locator('summary').click();
+        await f.locator('[data-exec="riskPct"]').fill(SET.riskPct);await f.locator('[data-exec="riskPct"]').press('Tab');
+        await page.locator('.exec-form [data-exec="capital"]').fill(SET.capital);await page.locator('.exec-form [data-exec="capital"]').press('Tab');
+        await page.waitForSelector('#dec-list [data-exec-status="READY"],#dec-list [data-exec-status="NOT_EXECUTABLE"]',{timeout:10000});
+        for(let i=0;i<ACTIVE.length;i++){const en=ACTIVE[i],pl=X.plan({symbol:en.symbol,side:en.side,entry:en.entry,stop:en.stop,target:en.target},SET,RULES[en.symbol]),card=page.locator('#dec-list .dec-card').nth(i);
+          assert.equal(await card.locator('.exec').getAttribute('data-exec-status'),pl.status,en.symbol);if(pl.status!=='READY')continue;
+          for(const k of ['entry','stop','target']){const v=await card.locator(`[data-exv="${k}"]`).innerText();assert.equal(v,pl.priceStr[k]);assert(isMultiple(v,TICK[en.symbol]));}
+          assert.equal(await card.locator('[data-exv="qty"]').innerText(),pl.qtyStr);assert.equal(await card.locator('[data-exv="lev"]').innerText(),pl.leverage+'×');}
+        await page.reload();await page.waitForSelector('#dec-list .dec-card');await page.waitForFunction(()=>MalomoApp.app.state,null,{timeout:30000});assert.equal(await page.locator('.exec-form [data-exec="capital"]').inputValue(),SET.capital);
       });
-      await run(`[${viewport.width}px] Filter status menyaring kandidat`,async()=>{
-        await page.selectOption('[data-filter="status"]','REJECTED_RISK');
-        const sel=mob?'.cand-cards .cand-card':'.cand-table tbody tr';
-        assert.equal(await page.locator(sel).count(),recsT.filter(r=>r.status==='REJECTED_RISK').length);
-        await page.selectOption('[data-filter="status"]','');assert.equal(await page.locator(sel).count(),recsT.length);
-        // R33: label rezim BTC per kandidat = engine; filter "Searah BTC saja" hanya menyaring tampilan.
-        const rg=recsT.map(r=>Cy.btcRegime(expect.analyses,r));
-        assert.equal(await page.locator(sel+' [data-regime]').count(),rg.filter(Boolean).length);
-        for(let i=0;i<recsT.length;i++){const want=rg[i]?rg[i].code:null,got=await page.locator(sel).nth(i).locator('[data-regime]').count()?await page.locator(sel).nth(i).locator('[data-regime]').getAttribute('data-regime'):null;assert.equal(got,want,recsT[i].symbol);}
-        const before=await page.locator('[data-count="ENTRY_CONSIDER"] .v').innerText();
-        await page.selectOption('[data-filter="btc"]','ALIGNED');
-        assert.equal(await page.locator(sel).count(),rg.filter(x=>x&&x.code==='ALIGNED').length);
-        assert.equal(await page.locator('[data-count="ENTRY_CONSIDER"] .v').innerText(),before,'filter tampilan tidak boleh mengubah keputusan');
-        await page.selectOption('[data-filter="btc"]','');assert.equal(await page.locator(sel).count(),recsT.length);
-      });
-      await run(`[${viewport.width}px] Papan Event: 5 kolom, kartu menunggu tanpa skor`,async()=>{
-        await nav(page,viewport,'event');await page.waitForSelector('.board');
-        assert.equal(await page.locator('.board .col').count(),5);
-        const w=page.locator('[data-col="Menunggu"] .ev');assert.equal(await w.count(),expect.board.waiting.length);
-        for(let i=0;i<await w.count();i++)assert(!(await w.nth(i).innerText()).includes('/ 500'));
-        if(expect.board.confirmed.length){await page.locator('[data-col="Terkonfirmasi"] .ev.click').first().click();await page.locator('#inspector').waitFor({state:'visible'});await page.keyboard.press('Escape');}
+      await run(`[${viewport.width}px] Semua Pair: universe realtime, stablecoin/non-TRADING tersaring, M1 = engine, filter & urut`,async()=>{
+        await nav(page,viewport,'pairs');await page.waitForSelector('#pairs-body tr[data-pair]');
+        const syms=await page.locator('#pairs-body tr[data-pair]').evaluateAll(n=>n.map(x=>x.dataset.pair));
+        assert.deepEqual(syms,UNIVERSE.map(x=>x.symbol));assert(!syms.includes('USDCUSDT')&&!syms.includes('OLDUSDT'));
+        const m1=new Map(expect.pairRows.map(r=>[r.symbol,r.m1]));
+        for(const s of syms){const v=await page.locator(`#pairs-body tr[data-pair="${s}"] [data-m1]`).innerText();const w=m1.get(s);assert.equal(v,Number.isFinite(w)?C.display2(w).toFixed(2)+' / 100':'—',s);}
+        await page.selectOption('[data-pf="sort"]','m1');const sorted=await page.locator('#pairs-body tr[data-pair]').evaluateAll(n=>n.map(x=>x.dataset.pair));
+        const want=[...UNIVERSE].sort((a,b)=>((Number.isFinite(m1.get(b.symbol))?m1.get(b.symbol):-1)-(Number.isFinite(m1.get(a.symbol))?m1.get(a.symbol):-1))||a.rank-b.rank).map(x=>x.symbol);assert.deepEqual(sorted,want);
+        await page.selectOption('[data-pf="status"]','DECISION');assert.deepEqual((await page.locator('#pairs-body tr[data-pair]').evaluateAll(n=>n.map(x=>x.dataset.pair))).sort(),[...new Set(ACTIVE.map(x=>x.symbol))].sort());
+        await page.selectOption('[data-pf="status"]','');await page.selectOption('[data-pf="sort"]','rank');
         await common(page,viewport);
       });
-      await run(`[${viewport.width}px] Portofolio: 3 slot, kartu Decision live, meter, log penolakan`,async()=>{
-        await nav(page,viewport,'portofolio');await page.waitForSelector('#slots');
-        const act=expect.book.active.length;assert(act>0,'skenario harus punya posisi aktif');
-        assert.equal(await page.locator('#slots .dec-card').count(),act);assert.equal(await page.locator('#slots .slot-empty').count(),3-act);
-        if(act<3)assert((await page.locator('.slot-empty').first().innerText()).includes('kapasitas maksimum, bukan target'));
-        await page.waitForFunction(()=>document.querySelector('#slots .dec-card .dec-cell .val')&&!/menyambung|memuat/.test(document.querySelector('#slots .dec-card .dec-data').innerText),null,{timeout:20000});
-        const card=await page.locator('#slots .dec-card').first().innerText();
-        for(const s of ['RUNNING','SL','ENTRY','TP (2R)','RR','OPEN INTEREST','CVD (TAKER)','ORDERBOOK','SLOT 24 JAM','lepas dalam','Outcome riset','tidak masuk skor'])assert(card.includes(s),'kartu Decision tanpa '+s);
-        assert(/[+−-]?\d+\.\d\dR/.test(card),'R-multiple live tidak tampil');
-        const pg=await page.locator('main').innerText();for(const s of ['Risiko terbuka','Gross notional','Ekuitas acuan 100 unit, tanpa kompaun','Log penolakan risiko','Posisi selesai (outcome riset)'])assert(pg.includes(s),s);
+      await run(`[${viewport.width}px] Jurnal: baris & ringkasan = ledger, filter, unduh CSV lengkap`,async()=>{
+        await nav(page,viewport,'jurnal');await page.waitForSelector('[data-jstat="n"]');
+        const sm=LG.summary(FINISHED);
+        assert.equal(await page.locator('[data-jstat="n"] .v').innerText(),String(sm.n));assert.equal(await page.locator('[data-jstat="tp"] .v').innerText(),String(sm.TARGET_HIT));
+        assert.equal(await page.locator('[data-jstat="sl"] .v').innerText(),String(sm.STOP_HIT));assert.equal(await page.locator('[data-jstat="avg"] .v').innerText(),(sm.avgR>=0?'+':'')+sm.avgR.toFixed(3));
+        assert.equal(await page.locator('tr[data-jrow]').count(),Math.min(300,FINISHED.length));
+        await page.selectOption('[data-jf="outcome"]','STOP_HIT');assert.equal(await page.locator('tr[data-jrow]').count(),Math.min(300,FINISHED.filter(x=>x.outcome.code==='STOP_HIT').length));
+        const [dl]=await Promise.all([page.waitForEvent('download'),page.locator('[data-action="download-journal"]').click()]);
+        const csv=fs.readFileSync(await dl.path(),'utf8').replace(/^﻿/,'').trim().split('\r\n');
+        assert.equal(csv[0],LG.COLS.join(','));assert.equal(csv.length-1,FINISHED.filter(x=>x.outcome.code==='STOP_HIT').length);assert(csv.slice(1).every(l=>l.includes('kena SL')));
+        await page.selectOption('[data-jf="outcome"]','');await page.locator('[data-jf="m6min"]').fill('9999');await page.locator('[data-jf="m6min"]').press('Tab');
+        assert.equal(await page.locator('[data-empty="jurnal"]').count(),1);await page.locator('[data-jf="m6min"]').fill('');await page.locator('[data-jf="m6min"]').press('Tab');
         await common(page,viewport);
       });
-      await run(`[${viewport.width}px] Rencana siap salin R32: kosong → minta modal; isi → angka = engine exec, kelipatan tick, tersimpan`,async()=>{
-        assert.equal(await page.locator('#slots .exec[data-exec-status="NEED_SETTINGS"]').count(),expect.book.active.length);
-        await page.locator('.exec-form [data-exec="riskPct"]').fill('2');await page.locator('.exec-form [data-exec="riskPct"]').press('Tab');
-        assert((await page.locator('.exec-form').innerText()).includes('tidak valid'),'risiko 2% harus ditolak');
-        await page.locator('.exec-form [data-exec="riskPct"]').fill('0.75');await page.locator('.exec-form [data-exec="riskPct"]').press('Tab');
-        await page.locator('.exec-form [data-exec="capital"]').fill('2500');await page.locator('.exec-form [data-exec="capital"]').press('Tab');
-        await page.waitForSelector('#slots .exec[data-exec-status="READY"]',{timeout:10000});
-        const set={capital:'2500',riskPct:'0.75',costBps:'18'};
-        for(let i=0;i<expect.book.active.length;i++){
-          const p=expect.book.active[i],pl=X.plan({symbol:p.symbol,side:p.side,entry:p.entry,stop:p.stop,target:p.target},set,RULES[p.symbol]);
-          const card=page.locator('#slots .dec-card').nth(i);
-          assert.equal(await card.locator('.exec').getAttribute('data-exec-status'),pl.status,p.symbol);
-          if(pl.status!=='READY')continue;
-          for(const k of ['entry','stop','target']){const v=await card.locator(`[data-exv="${k}"]`).innerText();assert.equal(v,pl.priceStr[k],p.symbol+' '+k);assert(isMultiple(v,TICK[p.symbol]),v);}
-          assert.equal(await card.locator('[data-exv="qty"]').innerText(),pl.qtyStr);
-          assert.equal(await card.locator('[data-exv="lev"]').innerText(),pl.leverage+'×');
-          assert(pl.lossAtStop<=2500*0.0075+1e-9);
-          const vals=await card.locator('.exec [data-action="copy-val"]').evaluateAll(b=>b.map(x=>x.dataset.val));
-          assert.deepEqual(vals,[pl.priceStr.entry,pl.priceStr.stop,pl.priceStr.target,pl.qtyStr]);
-          const t=await card.locator('.exec').innerText();for(const s of ['Leverage maks aman','Rugi bila SL kena','termasuk biaya','likuidasi','Pasang limit order','tidak mengirim order'])assert(t.includes(s),s);
-        }
-        // pengaturan tersimpan di browser ini
-        await page.reload();await page.waitForSelector('#slots .exec[data-exec-status="READY"]',{timeout:20000});
-        assert.equal(await page.locator('.exec-form [data-exec="capital"]').inputValue(),'2500');
-        // tab Rencana di inspektor untuk ENTRY_CONSIDER memakai pengaturan yang sama
-        await nav(page,viewport,'siklus');await page.locator(mob?'.cand-card':'.cand-table tbody tr').first().click();
-        await page.locator('#inspector [data-tab="rencana"]').click();
-        const r0=recsT[0],pl0=X.plan({symbol:r0.symbol,side:r0.side,entry:r0.entry_reference_open,stop:r0.stop_price,target:r0.target_price},set,RULES[r0.symbol]);
-        assert.equal(await page.locator('#inspector .exec').getAttribute('data-exec-status'),pl0.status);
-        if(pl0.status==='READY')assert.equal(await page.locator('#inspector [data-exv="entry"]').innerText(),pl0.priceStr.entry);
-        await common(page,viewport);
-        await page.keyboard.press('Escape');
+      if(mob)await run('[390px] Navigasi mobile: 3 tab bawah, rail tersembunyi',async()=>{
+        assert(await page.locator('.tabbar').isVisible());assert(!(await page.locator('.rail').isVisible()));assert.equal(await page.locator('.tabbar a').count(),3);
       });
-      await run(`[${viewport.width}px] Konteks Pasar: 6 chart, tabel M1, heatmap 6×6`,async()=>{
-        await nav(page,viewport,'pasar');await page.waitForSelector('.charts');
-        assert.equal(await page.locator('.chart svg').count(),expect.context.rows.length);assert(expect.context.rows.length>=6);assert.equal(await page.locator('.heat .c').count(),36);
-        const tb=await page.locator('main table').innerText();for(const s of C.PAIRS)assert(tb.includes(s));
-        assert(!/RSI|MACD|EMA/.test(await page.locator('main').innerText()),'indikator di luar PRD tampil');
-        await common(page,viewport);
-      });
-      await run(`[${viewport.width}px] Audit & Data: kesehatan, hash cocok manifest, build, unduh log`,async()=>{
-        await nav(page,viewport,'audit');await page.waitForSelector('[data-action="download-audit"]');
-        const t=await page.locator('main').innerText();
-        assert.equal((t.match(/cocok manifest/g)||[]).length,2,'hash normalisasi harus cocok manifest');
-        for(const s of ['FROZEN_COMPLETE_TRAIN_ECDF','n=258','n=189','n=44','M5_AUDIT_2024_CLOSED_BAR_9BPS_V1','BREAKOUT_2024_NO_DIRECTION_GATE','Belum diuji engine','Universe hari ini (R34)'])assert(t.includes(s),s);
-        const ut=page.locator('[data-universe-table] tbody tr');assert.equal(await ut.count(),UNIVERSE.length);
-        assert.deepEqual((await ut.allInnerTexts()).map(x=>x.split(/\s+/)[1]),UNIVERSE.map(x=>x.symbol));
-        const [dl]=await Promise.all([page.waitForEvent('download'),page.locator('[data-action="download-audit"]').click()]);
-        const body=fs.readFileSync(await dl.path(),'utf8').trim().split('\n');assert(body.length>10);body.forEach(l=>JSON.parse(l));
-        await common(page,viewport);
-      });
-      if(mob)await run('[390px] Navigasi mobile: tab bawah tampil, rail tersembunyi',async()=>{
-        assert(await page.locator('.tabbar').isVisible());assert(!(await page.locator('.rail').isVisible()));
-      });
-      await run(`[${viewport.width}px] Tanpa error JavaScript / tombol order`,async()=>{
+      await run(`[${viewport.width}px] Layar lama terhapus, tanpa error JavaScript / tombol order / unduh log audit`,async()=>{
+        assert.equal(await page.locator('[data-screen="siklus"],[data-screen="event"],[data-screen="portofolio"],[data-screen="pasar"],[data-screen="audit"],#stepper,#inspector,[data-action="download-audit"]').count(),0);
         assert.deepEqual(errors,[]);assert.deepEqual(OUTSIDE,[],'candle pair di luar universe diunduh');
         const btn=await page.locator('button,a').allInnerTexts();assert(!btn.some(b=>/^(beli|jual|buy|sell|order|long now|short now)$/i.test(b.trim())));
       });
       await context.close();
     }
-    await run('FETCH_FAILED: pair gagal → indikator kuning, siklus DATA_INCOMPLETE, tanpa ENTRY_CONSIDER',async()=>{
-      const {context,page,errors}=await setup(browser,{width:1280,height:900},{failSymbol:'DOGEUSDT'});
-      await page.waitForFunction(()=>/FETCH_FAILED/.test(document.getElementById('health').innerText),null,{timeout:20000});
-      await page.waitForSelector('.warnbox');
-      assert.equal(Number(await page.locator('[data-count="ENTRY_CONSIDER"] .v').innerText()),0);
-      assert((await page.locator('#stepper').innerText()).includes('FETCH_FAILED'));
-      await page.locator('[data-screen="audit"]').first().click();await page.waitForSelector('[data-action="download-audit"]');assert((await page.locator('main').innerText()).includes('Gagal ambil data'));
+    await run('SKOR DIKUNCI: semua candle diubah lalu dihitung ulang → skor & harga Decision tidak berubah; ledger tersimpan setelah reload',async()=>{
+      const {context,page,errors}=await setup(browser,{width:1280,height:900});
+      await page.waitForSelector('#dec-list .dec-card',{timeout:30000});
+      const snap=()=>page.evaluate(()=>JSON.stringify(Object.values(MalomoApp.app.ledger.entries).map(e=>[e.key,e.scores,e.entry,e.stop,e.target,e.decisionMs])));
+      const before=new Map(JSON.parse(await snap()).map(x=>[x[0],x]));
+      const cardText=()=>page.locator('#dec-list .dec-card').evaluateAll(n=>Object.fromEntries(n.map(x=>[x.dataset.dec,x.querySelector('.dec-scores').innerText+' | '+x.querySelector('.dec-lv').innerText])));
+      const cardsBefore=await cardText();
+      const recomputed=await page.evaluate(async()=>{const a=MalomoApp.app;for(const s of Object.keys(a.raw))a.raw[s]=a.raw[s].map(c=>Object.assign({},c,{close:c.close*1.07,high:c.high*1.07,low:c.low*0.93,volume:c.volume*3}));
+        await MalomoApp.rebuildNow();return a.state.history.filter(r=>r.status==='ENTRY_CONSIDER').map(r=>[r.symbol+'|'+r.side+'|'+r.signal_family+'|'+r.decision_available_utc,r.scores.m6_confluense_500]);});
+      // engine memang menghasilkan skor lain atas data yang diubah …
+      const differs=recomputed.filter(([k,m6])=>before.has(k)&&before.get(k)[1].m6!==m6).length;
+      assert(differs>0,'uji tidak bermakna: skor engine tidak berubah');
+      // … tetapi entri ledger yang sudah ada tidak berubah sedikit pun
+      for(const x of JSON.parse(await snap()))if(before.has(x[0]))assert.deepEqual(x,before.get(x[0]),'entri berubah: '+x[0]);
+      const cardsAfter=await cardText();for(const k of Object.keys(cardsBefore))assert.equal(cardsAfter[k],cardsBefore[k],'kartu berubah: '+k);
+      await page.reload();await page.waitForSelector('#dec-list .dec-card');
+      const stored=await page.evaluate(()=>Object.keys(JSON.parse(localStorage.getItem('malomo_v7_ledger')).entries).length);assert(stored>=ACTIVE.length,'ledger tersimpan '+stored);
       assert.deepEqual(errors,[]);await context.close();
     });
-    await run('exchangeInfo gagal → rencana tampil "belum dibulatkan", tanpa tombol salin',async()=>{
+    await run('FETCH_FAILED: pair penentu gagal → indikator kuning, tidak ada Decision baru di close ini',async()=>{
+      const {context,page,errors}=await setup(browser,{width:1280,height:900},{failSymbol:ACTIVE.find(x=>x.decisionMs===T).symbol});
+      await page.waitForFunction(()=>/FETCH_FAILED/.test(document.getElementById('health').innerText),null,{timeout:30000});
+      await page.waitForFunction(()=>MalomoApp.app.state,null,{timeout:30000});
+      assert.equal(await page.evaluate(T=>Object.values(MalomoApp.app.ledger.entries).filter(e=>e.decisionMs===T).length,T),0);
+      assert.deepEqual(errors,[]);await context.close();
+    });
+    await run('Universe gagal (ticker/24hr gagal & stream kosong) → peringatan, hanya 6 pair inti',async()=>{
+      const {context,page,errors}=await setup(browser,{width:1280,height:900},{tickerFail:true});
+      await page.addInitScript(()=>{});
+      await page.waitForFunction(()=>MalomoApp.app.state,null,{timeout:120000});
+      const u=await page.evaluate(()=>MalomoApp.app.universe);
+      if(u.source==='core'){assert((await page.locator('#universe').innerText()).includes('Universe 100 pair belum bisa ditetapkan'));assert.deepEqual(Object.keys(await page.evaluate(()=>MalomoApp.app.raw)).sort(),[...C.PAIRS].sort());}
+      else assert.equal(u.list.length,UNIVERSE.length,'stream !ticker@arr mengisi universe walau REST gagal');
+      assert.deepEqual(errors,[]);await context.close();
+    });
+    await run('exchangeInfo gagal → universe 6 pair inti + peringatan; rencana "belum dibulatkan" tanpa tombol salin',async()=>{
       const {context,page,errors}=await setup(browser,{width:1280,height:900},{eiFail:true});
       await page.evaluate(()=>localStorage.setItem('malomo_v7_exec',JSON.stringify({capital:'1000',riskPct:'0.5',costBps:'18'})));
-      await page.reload();await page.locator('[data-screen="portofolio"]').first().click();
-      // exchangeInfo dicoba ulang ±50 detik; universe tidak bisa disaring tanpa daftar kontrak → cadangan 6 pair inti + peringatan
-      await page.waitForSelector('#slots .exec[data-exec-status="UNROUNDED"]',{timeout:120000});
-      await page.locator('[data-screen="siklus"]').first().click();await page.waitForSelector('[data-count="ENTRY_CONSIDER"]');
-      assert((await page.locator('main').innerText()).includes('Universe 100 pair belum bisa ditetapkan'),'peringatan universe');
-      await page.locator('[data-screen="portofolio"]').first().click();await page.waitForSelector('#slots .exec[data-exec-status="UNROUNDED"]');
-      assert.equal(await page.locator('#slots .exec [data-action="copy-val"]').count(),0);
-      const t=await page.locator('main').innerText();assert(t.includes('Belum dibulatkan')&&t.includes('jangan disalin sebagai order'));
+      await page.reload();
+      await page.waitForFunction(()=>MalomoApp.app.state,null,{timeout:150000});
+      assert((await page.locator('#universe').innerText()).includes('Universe 100 pair belum bisa ditetapkan'));
+      if(await page.locator('#dec-list .exec').count()){assert.equal(await page.locator('#dec-list .exec[data-exec-status="UNROUNDED"]').count(),await page.locator('#dec-list .exec').count());
+        assert.equal(await page.locator('#dec-list [data-action="copy-val"]').count(),0);}
       assert.deepEqual(errors,[]);await context.close();
     });
-    await run('Universe gagal ditetapkan (ticker/24hr gagal) → peringatan, hanya 6 pair inti dihitung, skor sama dengan engine',async()=>{
-      const {context,page,errors}=await setup(browser,{width:1280,height:900},{tickerFail:true});
-      await page.waitForSelector('[data-count="ENTRY_CONSIDER"]',{timeout:90000});
-      const t=await page.locator('main').innerText();assert(t.includes('Universe 100 pair belum bisa ditetapkan'),'peringatan universe');
-      const rows=await page.locator('.cand-table tbody tr').allInnerTexts();
-      assert.equal(rows.length,coreOnly.cycle.records.length);assert(rows.every(x=>C.PAIRS.some(p=>x.includes(p))));
+    await run('Fase CLOSE_CANDIDATE: open berikutnya belum ada → tidak ada Decision untuk close itu',async()=>{
+      const {context,page,errors}=await setup(browser,{width:1280,height:900},{noForming:true});
+      await page.waitForFunction(()=>MalomoApp.app.state,null,{timeout:30000});
+      assert.equal(await page.evaluate(T=>Object.values(MalomoApp.app.ledger.entries).filter(e=>e.decisionMs===T).length,T),0);
       assert.deepEqual(errors,[]);await context.close();
     });
     await run('Semua pair gagal saat pertama dibuka → pesan FETCH_FAILED, tanpa skor palsu',async()=>{
       const {context,page,errors}=await setup(browser,{width:1280,height:900},{failSymbol:'ALL'});
-      await page.waitForFunction(()=>/FETCH_FAILED/.test(document.getElementById('health').innerText),null,{timeout:20000});
+      await page.waitForFunction(()=>/FETCH_FAILED/.test(document.getElementById('health').innerText),null,{timeout:30000});
       const t=await page.locator('main').innerText();assert(t.includes('belum berhasil diambil'));assert(!/\/ 500/.test(t));
-      assert.deepEqual(errors,[]);await context.close();
-    });
-    await run('Fase CLOSE_CANDIDATE: open berikutnya belum ada → Rencana "Menunggu open"',async()=>{
-      const {context,page,errors}=await setup(browser,{width:1280,height:900},{noForming:true});
-      await page.waitForSelector('[data-count="CLOSE_CANDIDATE"]',{timeout:20000});
-      assert((await page.locator('#stepper').innerText()).includes('menunggu open'));
-      await page.locator('.cand-table tbody tr').filter({hasText:'Kandidat, menunggu open'}).first().click();
-      await page.locator('#inspector [data-tab="rencana"]').click();
-      assert((await page.locator('#inspector').innerText()).includes('Menunggu open candle berikutnya'));
       assert.deepEqual(errors,[]);await context.close();
     });
   }finally{await browser.close();server.close();}

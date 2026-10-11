@@ -258,7 +258,7 @@ test('Live posisi: CVD taker (m=true → jual), orderbook imbalance, jendela CVD
 });
 
 // ---------- pemindaian statis ----------
-const SRC=['app/index.html','app/main.js','app/ui.js','app/cycle.js','app/transport.js','app/live.js','app/labels.js','app/exec.js','app/universe.js','app/worker.js','app/sw.js',...fs.readdirSync(path.join(ROOT,'engine')).map(f=>'engine/'+f)];
+const SRC=['app/index.html','app/main.js','app/ui.js','app/cycle.js','app/transport.js','app/live.js','app/labels.js','app/exec.js','app/universe.js','app/ledger.js','app/worker.js','app/sw.js',...fs.readdirSync(path.join(ROOT,'engine')).map(f=>'engine/'+f)];
 const read=f=>fs.readFileSync(path.join(ROOT,f),'utf8');
 test('Statis: tanpa endpoint order/akun, tanpa API key/signature, hanya REST publik + WebSocket pasar',()=>{
   for(const f of SRC){const s=read(f);

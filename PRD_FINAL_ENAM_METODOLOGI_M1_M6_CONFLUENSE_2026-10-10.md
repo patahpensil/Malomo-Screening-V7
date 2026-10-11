@@ -1,6 +1,6 @@
 # PRD FINAL — ENAM METODOLOGI TRADING BERBOBOT & M6 CONFLUENSE
 
-**Versi:** 1.0.12-FINAL-DESIGN (revisi konsistensi dokumen atas 1.0.0; lihat Riwayat revisi)  
+**Versi:** 1.0.13-FINAL-DESIGN (revisi konsistensi dokumen atas 1.0.0; lihat Riwayat revisi)  
 **Tanggal keputusan:** 10 Oktober 2026  
 **Bahasa spesifikasi:** Indonesia; nama field dan status Inggris untuk kontrak antar-agen.  
 **Ruang lingkup:** spesifikasi metodologi penelitian dan protokol keluaran agen; **bukan permintaan membuat aplikasi, mengirim order, commit, push, atau deploy**.  
@@ -26,6 +26,7 @@
 | 1.0.10 | 11 Okt 2026 | (R31) §15 baru: hasil Tahap A2 — riset generator sinyal baru dan lapis rezim BTC (28 konfigurasi dikunci sebelum hasil dilihat), uji ketahanan kandidat terbaik, kesimpulan, dan rekomendasi arah berikutnya. | **Temuan dan usulan**, belum mengubah aturan normatif §1–§13 |
 | 1.0.11 | 11 Okt 2026 | §16 baru, disetujui pengguna untuk penggunaan uang nyata: (R32) rencana eksekusi siap salin — harga dibulatkan ke `tickSize` Binance ke arah aman, qty dari modal & risiko pengguna (0,5–1%) dibulatkan ke `stepSize`, leverage maksimum aman dihitung otomatis, aturan pair dari `/fapi/v1/exchangeInfo` publik. (R33) label rezim BTC informatif (bukan gate) + filter tampilan. Kalimat kuantisasi §6 diberi rujukan ke §16. Tanpa kill switch (keputusan pengguna). | **Lapisan tampilan**; tidak mengubah bobot, rumus skor, generator, keputusan, record audit, atau portofolio simulasi §6 |
 | 1.0.12 | 11 Okt 2026 | §17 baru, keputusan pengguna: (R34) universe aplikasi live = **100 pair USDT perpetual dengan volume harian tertinggi**, ranking ditetapkan setiap close candle harian 00:00 UTC (08:00 WITA), berlaku sebagai **hard gate** sampai close harian berikutnya; basket M3 tetap enam pair §1; tidak ada perubahan bobot atau rumus skor. Penyesuaian R32: alt di luar 30 besar memakai asumsi MMR 2,5% dan batas leverage 20×. | **Cakupan pair aplikasi**; rumus dan bobot M1–M6, generator, gate keputusan, kontrak §10, dan portofolio §6 tidak berubah |
+| 1.0.13 | 12 Okt 2026 | §18 baru, keputusan pengguna (Tahap 1): (R35) aplikasi menjadi tiga layar — **Decision** (hard gate = status layak dipertimbangkan, skor dikunci saat masuk), **Semua Pair** (universe realtime + M1 per pair), **Jurnal Sinyal** (hasil SL/TP/horizon + unduh CSV); universe 100 pair kini **realtime** dari volume 24 jam berjalan (stream publik), gate keputusan memakai snapshot universe pada close 4H; layar riset lama, inspektor, dan unduh log audit dihapus. Perbaikan: pair penentu yang gagal diunduh sejak percobaan pertama kini tetap menahan keputusan (§1). | **Lapisan tampilan & cakupan data**; rumus dan bobot M1–M6, generator, gate keputusan, kontrak §10, dan portofolio §6 tidak berubah. Referensi UI/UX enam layar digantikan §18 |
 
 ## 0. Hirarki kewenangan dan larangan interpretasi
 
@@ -803,3 +804,42 @@ Tahap A/A2 (§14–§15) hanya menguji 30 pair teratas; pair peringkat 31–100 
 ### 17.5 Tes
 
 `scripts/test-universe.js`: filter kontrak (stablecoin, indeks, non-perpetual, non-TRADING), kumpulan kandidat, volume candle harian 00:00 UTC, ranking & tie-break, batas hari 08:00 WITA; **invarian skor** — setiap event pair inti memiliki M1/M2/M3/M5 identik dihitung bersama enam pair maupun bersama universe, dan skor pair tambahan identik bila dihitung terpisah; M3 tetap basket enam pair; hard gate per close; keluaran Web Worker identik. `scripts/test-browser.js`: universe tiruan (stablecoin bervolume raksasa tersaring, pair non-TRADING tidak diunduh), peringkat tampil, kegagalan ranking → cadangan + peringatan. `scripts/test-browser-live.js` dengan kline 4H ASLI arsip data.binance.vision (20 pair di CI): universe dari volume harian asli, record browser identik dengan engine Node.
+
+## 18. Tiga layar penggunaan nyata: Decision, Semua Pair, Jurnal (v1.0.13)
+
+**Keputusan pengguna (12 Okt 2026, Tahap 1):** aplikasi disederhanakan untuk trading dengan uang nyata. **Referensi UI/UX enam layar digantikan** oleh tiga layar di bawah. Rumus, bobot, generator, gate, dan kontrak §1–§13 **tidak berubah**. Tahap 2 (skor untuk semua 100 pair dan nilai skor layak untuk Decision) adalah riset terpisah yang wajib dirancang, diuji backtest, dan disetujui pengguna sebelum dipakai.
+
+### 18.1 R35 — Universe realtime (mengganti ranking harian §17.1)
+
+- **Sumber:** stream publik semua pair (statistik 24 jam berjalan, diperbarui ±1 detik) dengan snapshot awal dari ticker 24 jam REST; tanpa API key. Satu koneksi memberi harga terakhir dan volume 24 jam semua pair.
+- **Ranking:** kontrak yang sama dengan §17.1 butir 1 (perpetual, USDT, TRADING, bukan stablecoin/indeks); urut quote volume 24 jam berjalan ↓, seri → simbol ↑; 100 teratas. Diperbarui setiap 5 detik di layar.
+- **Gate keputusan:** pada setiap close 4H, daftar 100 pair saat itu **dibekukan sebagai snapshot** dan menjadi hard gate keputusan close tersebut (disimpan di browser, dipakai ulang bila aplikasi dibuka ulang dalam siklus yang sama). Pair yang masuk 100 besar di tengah siklus diunduh di latar dan ikut keputusan mulai close berikutnya.
+- Pair penentu keputusan (snapshot + enam pair inti + pair dengan Decision berjalan) yang gagal diunduh — termasuk yang gagal sejak percobaan pertama — menahan keputusan lintas pair sesuai §1.
+
+### 18.2 R35 — Layar Decision (hard gate, skor dikunci)
+
+- **Isi:** setiap pair berstatus layak dipertimbangkan (seluruh gate PRD lolos, termasuk slot dan risiko portofolio simulasi §6) yang slot 24 jamnya masih berjalan. Urutan: close terbaru, lalu M6.
+- **Skor dikunci:** saat pertama kali terlihat, record dibekukan ke **ledger** di browser: M1, M2 kualitas, M2, M3, M4, M5, M6, M1+M2q, harga entry/SL/TP, waktu, peringkat volume pada snapshot, label rezim BTC, invalidasi, versi. Entri **tidak pernah ditimpa** oleh refresh data, pergantian universe, atau replay ulang; yang boleh berubah hanya hasil selama masih berjalan.
+- **Sumber entri:** live (dibekukan pada siklus close-nya) atau replay (sinyal lampau yang pertama terlihat lewat replay saat aplikasi dibuka); diberi label.
+- **Kartu:** skor terkunci, harga live dan R, progres SL→entry→TP, rencana siap salin (R32), label rezim BTC (R33), OI, CVD, orderbook, dan peringatan invalidasi.
+- **Belum ada batas skor layak.** Backtest Tahap A menunjukkan urutan M6 setara acak; batas hanya dipasang bila riset Tahap 2 menemukan nilai yang konsisten di 2024, 2025, dan 2026.
+
+### 18.3 R35 — Layar Semua Pair
+
+Tabel universe realtime: peringkat, pair, harga, perubahan 24 jam, volume 24 jam, struktur M1 dan skor M1 pada candle 4H terakhir yang close (rumus §3, identik untuk semua pair), status (Decision / setup menunggu / tidak ada), dan M6 bila pair ada di Decision. Filter struktur & status, pencarian, urut volume atau M1. M6 untuk pair tanpa sinyal tetap tidak ada (null, bukan 0) — skor per pair untuk semua 100 pair adalah riset Tahap 2.
+
+### 18.4 R35 — Layar Jurnal Sinyal
+
+- **Isi per sinyal selesai:** waktu keputusan (UTC + WITA), pair, peringkat volume, arah, keluarga, sumber, skor terkunci (M1, M2 kualitas, M1+M2q, M2–M6), label rezim BTC, struktur M1, entry, SL, TP, RR, hasil (kena TP / kena SL / keluar 24 jam / data tidak ada), waktu keluar, harga keluar, R, durasi, invalidasi.
+- **Aturan hasil (sama dengan §6):** candle 4H yang sudah close dalam 24 jam sejak entry; SL dievaluasi lebih dahulu bila SL dan TP tersentuh di candle yang sama; tanpa keduanya → keluar pada close candle ke-6. Hasil final tidak berubah lagi. Bila candle pair tidak lagi tersedia dan 48 jam sudah lewat → "data tidak ada" (bukan tebakan).
+- **Ringkasan dan filter:** jumlah kena TP / kena SL / keluar 24 jam, rata-rata R; filter pair, arah, keluarga, hasil, sumber, rentang M6.
+- **Unduh CSV** (UTF-8, kolom tetap) untuk evaluasi pengguna. Hasil adalah hasil sinyal menurut candle Binance, bukan fill order akun pengguna.
+- Ledger dibatasi 5.000 entri terbaru; disimpan hanya di browser perangkat itu.
+
+### 18.5 Yang dihapus
+
+Layar Siklus 4H (tabel kandidat), inspektor beserta tab Skor/Rencana/Audit/JSON, Papan Event, Portofolio Simulasi (kartu Decision dipindah ke layar Decision), Konteks Pasar, Audit & Data, deretan tahapan pipeline, dan **unduh log audit**. Seluruh perhitungan di baliknya tetap berjalan.
+
+### 18.6 Tes
+
+`scripts/test-ledger.js`: pembekuan hanya status layak dipertimbangkan; entri tidak pernah ditimpa; hasil SL-lebih-dahulu/TP/horizon dan harga keluar; hasil final tetap; "data tidak ada"; ringkasan, filter M6, CSV (escape, BOM, WITA), pemuatan aman, batas 5.000; hasil ledger identik dengan hasil engine §6. `scripts/test-universe.js`: ranking 24 jam berjalan, stream semua pair (seed, pembaruan, watchdog), regresi FETCH_FAILED pair tanpa data. `scripts/test-browser.js` (desktop + mobile): kartu Decision = ledger engine, rencana siap salin, **skor dikunci** setelah seluruh candle diubah dan dihitung ulang (engine memang menghasilkan skor lain, entri ledger tidak berubah), Semua Pair (M1 = engine, filter, urut), Jurnal (ringkasan, filter, CSV), layar lama terhapus, skenario FETCH_FAILED / universe gagal / exchangeInfo gagal / CLOSE_CANDIDATE. `scripts/test-browser-live.js` dengan kline 4H asli 20 pair: record dan ledger browser identik dengan Node.

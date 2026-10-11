@@ -184,7 +184,7 @@ pre.json{background:var(--bg);border:1px solid var(--border);border-radius:var(-
   .rail{display:none;}
   .content{padding:12px 12px 90px;}
   .cyclebar{padding:8px 12px;}
-  .tabbar{display:grid;grid-template-columns:repeat(5,1fr);position:fixed;left:0;right:0;bottom:0;z-index:15;background:var(--surface);border-top:1px solid var(--border);padding-bottom:env(safe-area-inset-bottom);}
+  .tabbar{display:grid;grid-template-columns:repeat(3,1fr);position:fixed;left:0;right:0;bottom:0;z-index:15;background:var(--surface);border-top:1px solid var(--border);padding-bottom:env(safe-area-inset-bottom);}
   .tabbar a{display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 0;font-size:11px;text-decoration:none;color:var(--text-muted);}
   .tabbar a span{font-size:16px;}
   .tabbar a.active{color:var(--text);}
@@ -223,3 +223,26 @@ pre.json{background:var(--bg);border:1px solid var(--border);border-radius:var(-
 @media (max-width:767px){.exv-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.exf-grid{grid-template-columns:1fr;}}
 
 [data-universe]{margin:0 0 10px;}
+
+/* ---------- R35 tiga layar: Decision, Semua Pair, Jurnal ---------- */
+.cb-universe{margin-top:4px;}
+.warnbox.inline{display:inline-block;margin:0;padding:4px 10px;}
+.exec-form summary{cursor:pointer;list-style:none;}
+.exec-form summary::-webkit-details-marker{display:none;}
+.exec-form summary::before{content:'▸ ';color:var(--text-muted);}
+.exec-form[open] summary::before{content:'▾ ';}
+.exec-form[open] summary{margin-bottom:8px;}
+.dec-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:12px;}
+.dec-scores{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;align-items:end;margin:8px 0 10px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface-2);}
+.dec-scores span{display:block;color:var(--text-muted);font-size:10px;letter-spacing:.04em;text-transform:uppercase;}
+.dec-scores b{font-family:var(--mono);font-size:13px;}
+.dec-scores .lock{font-size:11px;color:var(--text-muted);white-space:nowrap;grid-column:1/-1;}
+.dec-scores b{white-space:nowrap;}
+.exec .kv.exk{grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);}
+table.pairs td,table.journal td{vertical-align:top;}
+td.pos{color:var(--long);} td.neg{color:var(--short);}
+@media (max-width:767px){
+  .dec-list{grid-template-columns:1fr;}
+}
+.filters input{font:inherit;font-size:13px;color:var(--text);background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-md);padding:6px 8px;min-width:0;width:120px;}
+.filters input:focus{outline:2px solid var(--primary);outline-offset:0;}
