@@ -1,6 +1,6 @@
 # PRD FINAL — ENAM METODOLOGI TRADING BERBOBOT & M6 CONFLUENSE
 
-**Versi:** 1.0.11-FINAL-DESIGN (revisi konsistensi dokumen atas 1.0.0; lihat Riwayat revisi)  
+**Versi:** 1.0.12-FINAL-DESIGN (revisi konsistensi dokumen atas 1.0.0; lihat Riwayat revisi)  
 **Tanggal keputusan:** 10 Oktober 2026  
 **Bahasa spesifikasi:** Indonesia; nama field dan status Inggris untuk kontrak antar-agen.  
 **Ruang lingkup:** spesifikasi metodologi penelitian dan protokol keluaran agen; **bukan permintaan membuat aplikasi, mengirim order, commit, push, atau deploy**.  
@@ -25,6 +25,7 @@
 | 1.0.9 | 11 Okt 2026 | (R30) §14 baru: hasil Tahap A — uji arsitektur sistem (backtest komposit, ablation per lapis) atas 30 pair USDⓈ-M paling likuid, Feb 2024–Okt 2026, data asli Binance; temuan per lapis, usulan perbaikan (benahi/tambah/kurangi), dan kriteria lanjut ke Tahap B. | **Temuan dan usulan**, belum mengubah aturan normatif §1–§13; perubahan aturan hanya lewat revisi terpisah setelah disetujui pengguna |
 | 1.0.10 | 11 Okt 2026 | (R31) §15 baru: hasil Tahap A2 — riset generator sinyal baru dan lapis rezim BTC (28 konfigurasi dikunci sebelum hasil dilihat), uji ketahanan kandidat terbaik, kesimpulan, dan rekomendasi arah berikutnya. | **Temuan dan usulan**, belum mengubah aturan normatif §1–§13 |
 | 1.0.11 | 11 Okt 2026 | §16 baru, disetujui pengguna untuk penggunaan uang nyata: (R32) rencana eksekusi siap salin — harga dibulatkan ke `tickSize` Binance ke arah aman, qty dari modal & risiko pengguna (0,5–1%) dibulatkan ke `stepSize`, leverage maksimum aman dihitung otomatis, aturan pair dari `/fapi/v1/exchangeInfo` publik. (R33) label rezim BTC informatif (bukan gate) + filter tampilan. Kalimat kuantisasi §6 diberi rujukan ke §16. Tanpa kill switch (keputusan pengguna). | **Lapisan tampilan**; tidak mengubah bobot, rumus skor, generator, keputusan, record audit, atau portofolio simulasi §6 |
+| 1.0.12 | 11 Okt 2026 | §17 baru, keputusan pengguna: (R34) universe aplikasi live = **100 pair USDT perpetual dengan volume harian tertinggi**, ranking ditetapkan setiap close candle harian 00:00 UTC (08:00 WITA), berlaku sebagai **hard gate** sampai close harian berikutnya; basket M3 tetap enam pair §1; tidak ada perubahan bobot atau rumus skor. Penyesuaian R32: alt di luar 30 besar memakai asumsi MMR 2,5% dan batas leverage 20×. | **Cakupan pair aplikasi**; rumus dan bobot M1–M6, generator, gate keputusan, kontrak §10, dan portofolio §6 tidak berubah |
 
 ## 0. Hirarki kewenangan dan larangan interpretasi
 
@@ -41,6 +42,8 @@
 **Tujuan:** memperoleh lima skor independen secara administratif (bukan diasumsikan independen secara statistik) untuk sebuah kandidat sinyal yang valid, lalu membentuk satu skor aritmetis `M6_CONFLUENSE_0_500`, mengurutkan kandidat dengan aturan deterministik, dan mengeluarkan rencana entry hipotetis serta alasan penolakan jika ada.
 
 **Universe v1:** `BTCUSDT`, `ETHUSDT`, `SOLUSDT`, `BNBUSDT`, `DOGEUSDT`, `XRPUSDT`. Venue penelitian `Binance USD-M Futures`. `timeframe=4h` untuk semua OHLCV dan indikator. `timezone=UTC`; contoh jadwal tutup candle 00:00/04:00/08:00/12:00/16:00/20:00 UTC. Tidak ada mixed spot/futures feed. Perlu 180 candle return masa lampau untuk M3, 120 NATR untuk M1, 20 candle untuk RVOL20; tidak boleh mengisi gap dengan interpolasi. **Warmup indikator (v1.0.7):** metode `ewm(alpha=1/14, adjust=False)` (§2) tidak memiliki panjang seed tetap; deret ATR/DI/ADX dihitung sejak candle pertama arsip (replay 2024: mulai 2024-01-01T00:00Z, 2.010 candle per pair, event pertama 2024-03-21), dan skor pertama hanya sah bila seluruh jendela M1/M3/RVOL di atas terpenuhi (minimal 181 close berurutan).
+
+**Universe aplikasi live (v1.0.12, §17):** kandidat sinyal pada aplikasi live diambil dari 100 pair USDT perpetual dengan volume harian tertinggi (ranking tiap close harian 00:00 UTC, hard gate). Keenam pair di atas tetap menjadi basket M3 (§5) dan tetap selalu diunduh; rumus skor setiap pair identik.
 
 **Kolom candle:** `symbol`, `open_time_utc`, `open`, `high`, `low`, `close`, `base_volume`, `close_time_utc`, `quote_volume`, `trade_count`, `taker_buy_base_volume`. Validasi `O,H,L,C>0`, `H>=max(O,C,L)`, `L<=min(O,C,H)`, `volume>=0`, `0<=taker_buy<=volume`, tidak ada duplicate open time, interval waktu tepat 4 jam, timestamp close dapat disusun UTC dari open+4h; nilai tak valid → `DATA_INCOMPLETE` untuk skor yang memakainya.
 
@@ -767,3 +770,36 @@ Label **tidak** mengubah status, skor, ranking M6, alasan penolakan, maupun reco
 ### 16.3 Yang tidak berubah dan tes
 
 Tidak berubah: generator, skor M1–M6, Reversal tetap aktif, ranking M6, gate, record §10, replay portofolio §6 (ekuitas acuan 100, float64), paritas 772/772. Tes wajib sebelum deploy (`scripts/test-exec.js`, `scripts/test-browser.js`): pembulatan empat arah pada berbagai ukuran tick; 5.000 kasus acak (risiko nyata ≤ batas, kelipatan tick/step tepat, arah pembulatan, likuidasi ≥ 2× jarak SL) dan 20.000 kasus pembulatan nilai besar; contoh hitung manual; penolakan minimum notional/minQty/margin/geometri/status pair; validasi input; parser `exchangeInfo` (format resmi dan varian gabungan); lima kondisi label rezim BTC dan kesamaannya dengan definisi §15; record audit tidak berubah; tes browser desktop dan mobile (panel, tombol salin, penyimpanan pengaturan, filter, `exchangeInfo` gagal).
+
+## 17. Universe dinamis 100 pair (v1.0.12)
+
+**Keputusan pengguna (11 Okt 2026):** pair yang dihitung dan ditampilkan aplikasi live adalah **100 pair dengan volume perdagangan harian tertinggi**, ditetapkan ulang setiap **close candle harian 08:00 WITA (00:00 UTC)**, sebagai **hard gate**. Tujuan pengguna: menilai sendiri skor setiap pair — karena itu **bobot dan rumus M1–M6 tidak diubah**; setiap pair dihitung dengan rumus yang persis sama dan menghasilkan skor sesuai datanya sendiri.
+
+### 17.1 R34 — Penetapan universe
+
+1. **Kontrak yang boleh diranking** (dari `/fapi/v1/exchangeInfo`, publik): kontrak perpetual, quote USDT, status `TRADING`, base bukan stablecoin (USDC, FDUSD, TUSD, BUSD, USDP, DAI, USDE, PYUSD, USD1, RLUSD, USDS, EURI, AEUR, XUSD, BFUSD, USDF), underlying bukan indeks.
+2. **Volume yang diranking:** quote volume (USDT) **candle harian yang baru close pada 00:00 UTC** (`/fapi/v1/klines` interval 1d, publik). Agar permintaan terbatas, candle harian hanya diambil untuk 150 pair eligible dengan volume 24 jam berjalan tertinggi (`/fapi/v1/ticker/24hr`, publik); ranking final tetap berdasarkan candle harian yang sudah close.
+3. **Ranking:** volume harian ↓; seri → simbol ↑; ambil 100 teratas. Pair tanpa candle harian penuh untuk hari itu (mis. listing baru) tidak ikut ranking hari itu.
+4. **Berlaku** sejak close 00:00 UTC sampai close harian berikutnya; disimpan di browser untuk hari yang sama sehingga membuka ulang aplikasi tidak mengunduh ulang.
+5. **Wajib lengkap:** bila satu saja permintaan candle harian kumpulan kandidat gagal setelah dicoba ulang, ranking hari itu **tidak** ditetapkan (tanpa tebakan). Aplikasi memakai daftar terakhir yang tersimpan (diberi peringatan "memakai daftar tanggal …"), atau bila tidak ada, hanya enam pair inti (peringatan), dan mencoba ulang tiap 5 menit.
+
+### 17.2 Hard gate dan perhitungan
+
+- **Gate:** untuk close 4H sejak 00:00 UTC hari berjalan, hanya pair dalam universe yang diteruskan ke penentuan keputusan (§8–§9). Pair di luar universe tidak dihitung, tidak tampil di Siklus 4H, Papan Event, maupun Konteks Pasar.
+- **Rumus tidak berubah:** generator, M1, M2, M4, M5, gate arah/integritas/risiko, tie-break §8.1.5, dan kontrak §10 identik. **M3 tetap basket enam pair §1** (§5): nilainya sama untuk semua kandidat pada close yang sama — perbedaan M6 antarpair berasal dari M1 dan kualitas M2 (§8.3).
+- **Posisi berjalan:** pair yang keluar dari universe tetap diunduh dan dipantau sampai slot 24 jamnya selesai, tetapi tidak menghasilkan keputusan baru.
+- **Riwayat replay (perkiraan):** daftar universe historis per hari tidak tersedia dari API; replay portofolio simulasi §6 untuk close sebelum hari berjalan memakai semua pair yang diunduh saat ini (universe hari ini + enam pair inti + posisi berjalan). Keputusan pada close hari berjalan memakai gate yang tepat.
+- **Data:** unduhan penuh 1.500 candle 4H per pair saat pertama dibuka; siklus berikutnya cukup 10 candle terakhir yang digabung (celah tetap terdeteksi, tidak diisi). FETCH_FAILED tetap mengikuti §1 untuk seluruh pair yang diunduh.
+- **Perhitungan di Web Worker:** engine yang sama dijalankan di luar thread tampilan agar 100 pair tidak membekukan layar; bila worker tidak tersedia, dihitung di thread utama. Keluaran identik (tes).
+
+### 17.3 Penyesuaian R32 untuk pair kecil
+
+Pair dengan peringkat volume di atas 30 (atau peringkat tidak diketahui) memakai asumsi MMR 2,5% dan batas leverage 20× (BTC/ETH tetap §16.1). Ini hanya membuat leverage maksimum aman lebih kecil; qty, risiko per trade, dan skor tidak berubah.
+
+### 17.4 Batas bukti
+
+Tahap A/A2 (§14–§15) hanya menguji 30 pair teratas; pair peringkat 31–100 **belum diuji** dan umumnya memiliki spread serta slippage lebih besar. Kalibrasi ECDF beku berasal dari enam pair 2024; untuk pair lain penerapannya ekstrapolasi. Hal ini tidak mengubah skor, tetapi wajib diingat saat menilai hasil.
+
+### 17.5 Tes
+
+`scripts/test-universe.js`: filter kontrak (stablecoin, indeks, non-perpetual, non-TRADING), kumpulan kandidat, volume candle harian 00:00 UTC, ranking & tie-break, batas hari 08:00 WITA; **invarian skor** — setiap event pair inti memiliki M1/M2/M3/M5 identik dihitung bersama enam pair maupun bersama universe, dan skor pair tambahan identik bila dihitung terpisah; M3 tetap basket enam pair; hard gate per close; keluaran Web Worker identik. `scripts/test-browser.js`: universe tiruan (stablecoin bervolume raksasa tersaring, pair non-TRADING tidak diunduh), peringkat tampil, kegagalan ranking → cadangan + peringatan. `scripts/test-browser-live.js` dengan kline 4H ASLI arsip data.binance.vision (20 pair di CI): universe dari volume harian asli, record browser identik dengan engine Node.

@@ -6,25 +6,39 @@ const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),
 let pw;try{pw=require(process.env.PLAYWRIGHT_MODULE||'playwright');}catch{pw=require('/opt/npm-tools/node_modules/playwright');}
 const {chromium}=pw;
 const ROOT=path.resolve(__dirname,'..'),SITE=path.join(ROOT,'_site');
-const C=require('../engine/core'),M2=require('../engine/m2'),Cy=require('../app/cycle'),X=require('../app/exec'),S=require('./synthetic');
+const C=require('../engine/core'),M2=require('../engine/m2'),Cy=require('../app/cycle'),X=require('../app/exec'),UV=require('../app/universe'),S=require('./synthetic');
 const H4=C.H4;
 if(!fs.existsSync(path.join(SITE,'index.html'))){console.error('Jalankan node scripts/build-site.js dulu');process.exit(1);}
 const FROZEN=M2.frozenFrom(JSON.parse(fs.readFileSync(path.join(ROOT,'evidence/frozen_cdf_normalization.json'),'utf8')),JSON.parse(fs.readFileSync(path.join(ROOT,'evidence/frozen_v2_normalizations.json'),'utf8')));
+// Universe tiruan R34: 6 pair inti + 6 pair tambahan (seri sintetis lain, diganti nama) + stablecoin bervolume raksasa
+// yang wajib tersaring + pair SETTLING yang tidak boleh diunduh.
 const RAW=S.generate({n:1600});
+const EXTRA=S.generate({n:1600,seed:11}),RENAME={BTCUSDT:'AAAUSDT',ETHUSDT:'BBBUSDT',SOLUSDT:'CCCUSDT',BNBUSDT:'DDDUSDT',DOGEUSDT:'EEEUSDT',XRPUSDT:'FFFUSDT'};
+for(const [a,b] of Object.entries(RENAME))RAW[b]=EXTRA[a];
+const SYMS=Object.keys(RAW);
+const DAILY_VOL=Object.fromEntries(SYMS.map((s,i)=>[s,1e9-i*1e7]));DAILY_VOL.USDCUSDT=9e12;DAILY_VOL.OLDUSDT=5e12;
 // Pilih close dengan ENTRY_CONSIDER + REJECTED_RISK, sekaligus ada posisi aktif saat itu.
 const lastOpen=RAW.BTCUSDT[RAW.BTCUSDT.length-1][0];
-const full=Cy.buildState({rawBySymbol:Object.fromEntries(Object.entries(RAW).map(([s,r])=>[s,r.map(Cy.toCandle)])),now:lastOpen+10000,frozen:FROZEN});
+const full=Cy.buildState({rawBySymbol:Object.fromEntries(Object.entries(RAW).map(([s,r])=>[s,r.map(Cy.toCandle)])),now:lastOpen+10000,frozen:FROZEN,symbols:SYMS});
 const byT=new Map();for(const r of full.history){const k=Date.parse(r.decision_available_utc);if(!byT.has(k))byT.set(k,[]);byT.get(k).push(r.status);}
-const T=[...byT.entries()].filter(([,v])=>v.includes('ENTRY_CONSIDER')&&v.includes('REJECTED_RISK')).map(([k])=>k).pop();
+// close dengan ENTRY_CONSIDER (berada di urutan pertama tabel) + REJECTED_RISK
+const T=[...byT.entries()].filter(([,v])=>v[0]==='ENTRY_CONSIDER'&&v.includes('REJECTED_RISK')).map(([k])=>k).pop();
 const NOW=T+10000;
-const expect=Cy.buildState({rawBySymbol:Object.fromEntries(Object.entries(RAW).map(([s,r])=>[s,r.filter(k=>k[0]<=NOW).slice(-1500).map(Cy.toCandle)])),now:NOW,frozen:FROZEN});
+const UNIVERSE=UV.rank(Object.fromEntries(SYMS.map(s=>[s,DAILY_VOL[s]])));
+const expect=Cy.buildState({rawBySymbol:Object.fromEntries(Object.entries(RAW).map(([s,r])=>[s,r.filter(k=>k[0]<=NOW).slice(-1500).map(Cy.toCandle)])),now:NOW,frozen:FROZEN,
+  symbols:SYMS,gate:{fromMs:UV.dayStartOf(NOW),allowed:new Set(UNIVERSE.map(x=>x.symbol))}});
+const coreOnly=Cy.buildState({rawBySymbol:Object.fromEntries(C.PAIRS.map(s=>[s,RAW[s].filter(k=>k[0]<=NOW).slice(-1500).map(Cy.toCandle)])),now:NOW,frozen:FROZEN});
 
 // exchangeInfo tiruan (format resmi: filter terpisah) untuk rencana siap salin R32.
-const TICK={BTCUSDT:'0.10',ETHUSDT:'0.01',SOLUSDT:'0.0100',BNBUSDT:'0.010',DOGEUSDT:'0.000010',XRPUSDT:'0.0001'};
-const EI={symbols:C.PAIRS.map(s=>({symbol:s,status:'TRADING',filters:[{filterType:'PRICE_FILTER',tickSize:TICK[s],minPrice:'0.000001',maxPrice:'1000000'},
-  {filterType:'LOT_SIZE',stepSize:'0.001',minQty:'0.001',maxQty:'1000000'},{filterType:'MIN_NOTIONAL',notional:'5'}]}))};
-const RULES=X.parseRules(EI,C.PAIRS);
+const TICK={BTCUSDT:'0.10',ETHUSDT:'0.01',SOLUSDT:'0.0100',BNBUSDT:'0.010',DOGEUSDT:'0.000010',XRPUSDT:'0.0001',AAAUSDT:'0.10',BBBUSDT:'0.01',CCCUSDT:'0.001',DDDUSDT:'0.010',EEEUSDT:'0.000001',FFFUSDT:'0.0001',USDCUSDT:'0.0001',OLDUSDT:'0.001'};
+const EI={symbols:[...SYMS,'USDCUSDT','OLDUSDT'].map(s=>({symbol:s,contractType:'PERPETUAL',quoteAsset:'USDT',baseAsset:s.replace(/USDT$/,''),underlyingType:'COIN',status:s==='OLDUSDT'?'SETTLING':'TRADING',
+  filters:[{filterType:'PRICE_FILTER',tickSize:TICK[s],minPrice:'0.000001',maxPrice:'1000000'},{filterType:'LOT_SIZE',stepSize:'0.001',minQty:'0.001',maxQty:'1000000'},{filterType:'MIN_NOTIONAL',notional:'5'}]}))};
+const RULES=X.parseRules(EI,SYMS);for(const x of UNIVERSE)RULES[x.symbol].rank=x.rank;
+const DAY=UV.DAY,DAYSTART=UV.dayStartOf(NOW);
+const dailyRows=s=>[[DAYSTART-2*DAY,1,1,1,1,1,DAYSTART-DAY-1,String(DAILY_VOL[s]*0.9)],[DAYSTART-DAY,1,1,1,1,1,DAYSTART-1,String(DAILY_VOL[s])],[DAYSTART,1,1,1,1,1,DAYSTART+DAY-1,'5']];
+const TICKER=[...SYMS,'USDCUSDT','OLDUSDT'].map(s=>({symbol:s,quoteVolume:String(DAILY_VOL[s])}));
 const isMultiple=(str,step)=>{const dec=Math.max((str.split('.')[1]||'').length,(step.split('.')[1]||'').length),toInt=v=>{const [a,b='']=v.split('.');return BigInt(a+b.padEnd(dec,'0'));};return toInt(str)%toInt(step)===0n;};
+const OUTSIDE=[];   // permintaan candle untuk pair di luar universe (harus kosong)
 const TYPES={'.html':'text/html','.js':'application/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.webmanifest':'application/manifest+json'};
 const server=http.createServer((req,res)=>{
   let f=path.join(SITE,decodeURIComponent(req.url.split('?')[0]));if(req.url==='/'||req.url.startsWith('/#'))f=path.join(SITE,'index.html');
@@ -32,7 +46,7 @@ const server=http.createServer((req,res)=>{
   res.setHeader('Content-Type',TYPES[path.extname(f)]||'application/octet-stream');res.end(fs.readFileSync(f));
 });
 
-async function setup(browser,viewport,{failSymbol=null,noForming=false,eiFail=false}={}){
+async function setup(browser,viewport,{failSymbol=null,noForming=false,eiFail=false,tickerFail=false}={}){
   const context=await browser.newContext({viewport,serviceWorkers:'block',acceptDownloads:true});
   const page=await context.newPage(),errors=[];
   page.on('pageerror',e=>errors.push('pageerror: '+e.message));
@@ -55,10 +69,13 @@ async function setup(browser,viewport,{failSymbol=null,noForming=false,eiFail=fa
   await page.route('https://fapi.binance.com/**',async route=>{
     const u=new URL(route.request().url());
     if(u.pathname==='/fapi/v1/time')return route.fulfill({json:{serverTime:NOW}});
+    if(u.pathname==='/fapi/v1/ticker/24hr')return tickerFail?route.fulfill({status:503,body:'unavailable'}):route.fulfill({json:TICKER});
     if(u.pathname==='/fapi/v1/exchangeInfo')return eiFail?route.fulfill({status:503,body:'unavailable'}):route.fulfill({json:EI});
     if(u.pathname==='/fapi/v1/openInterest')return route.fulfill({json:{symbol:u.searchParams.get('symbol'),openInterest:'12345.6'}});
     if(u.pathname==='/fapi/v1/klines'){
       const s=u.searchParams.get('symbol'),lim=Number(u.searchParams.get('limit'));
+      if(s==='USDCUSDT'||s==='OLDUSDT'){OUTSIDE.push(s);return route.fulfill({status:404,body:'di luar universe'});}
+      if(u.searchParams.get('interval')==='1d')return route.fulfill({json:dailyRows(s)});
       if(s===failSymbol||failSymbol==='ALL')return route.fulfill({status:503,body:'unavailable'});
       const rows=RAW[s].filter(k=>k[0]<=NOW&&!(noForming&&k[0]===T)).slice(-lim);
       return route.fulfill({json:rows});
@@ -105,6 +122,12 @@ const nav=async(page,viewport,screen)=>{await page.locator((viewport.width<768?'
         const rej=page.locator(sel).filter({hasText:'Ditolak: risiko'}).first();assert((await rej.innerText()).includes('— / 500'));
         assert(await rej.locator('.bar.null').count()===1,'bar null harus diarsir');
         const clock=await page.locator('#cyclebar').innerText();assert(/UTC · \d\d:\d\d WITA/.test(clock));assert(clock.includes('Data lengkap'));
+        // R34: universe tampil, stablecoin & pair SETTLING tersaring, kandidat pair tambahan ikut dihitung
+        assert.equal(await page.locator('[data-universe]').getAttribute('data-universe'),String(UNIVERSE.length));
+        assert((await page.locator('[data-universe]').innerText()).includes('08:00 WITA'));
+        const all=await page.locator(sel).allInnerTexts();assert(!all.some(t=>/USDCUSDT|OLDUSDT/.test(t)));
+        if(recsT.some(r=>!C.PAIRS.includes(r.symbol)))assert(all.some(t=>/(AAA|BBB|CCC|DDD|EEE|FFF)USDT/.test(t)),'kandidat pair tambahan tidak tampil');
+        assert(all.every(t=>/#\d+/.test(t)),'peringkat volume tidak tampil');
         await common(page,viewport);
       });
       await run(`[${viewport.width}px] Inspektor: Skor/Rencana/Audit/JSON + versi selalu terlihat`,async()=>{
@@ -197,7 +220,7 @@ const nav=async(page,viewport,screen)=>{await page.locator((viewport.width<768?'
       });
       await run(`[${viewport.width}px] Konteks Pasar: 6 chart, tabel M1, heatmap 6×6`,async()=>{
         await nav(page,viewport,'pasar');await page.waitForSelector('.charts');
-        assert.equal(await page.locator('.chart svg').count(),6);assert.equal(await page.locator('.heat .c').count(),36);
+        assert.equal(await page.locator('.chart svg').count(),expect.context.rows.length);assert(expect.context.rows.length>=6);assert.equal(await page.locator('.heat .c').count(),36);
         const tb=await page.locator('main table').innerText();for(const s of C.PAIRS)assert(tb.includes(s));
         assert(!/RSI|MACD|EMA/.test(await page.locator('main').innerText()),'indikator di luar PRD tampil');
         await common(page,viewport);
@@ -206,7 +229,9 @@ const nav=async(page,viewport,screen)=>{await page.locator((viewport.width<768?'
         await nav(page,viewport,'audit');await page.waitForSelector('[data-action="download-audit"]');
         const t=await page.locator('main').innerText();
         assert.equal((t.match(/cocok manifest/g)||[]).length,2,'hash normalisasi harus cocok manifest');
-        for(const s of ['FROZEN_COMPLETE_TRAIN_ECDF','n=258','n=189','n=44','M5_AUDIT_2024_CLOSED_BAR_9BPS_V1','BREAKOUT_2024_NO_DIRECTION_GATE','Belum diuji engine'])assert(t.includes(s),s);
+        for(const s of ['FROZEN_COMPLETE_TRAIN_ECDF','n=258','n=189','n=44','M5_AUDIT_2024_CLOSED_BAR_9BPS_V1','BREAKOUT_2024_NO_DIRECTION_GATE','Belum diuji engine','Universe hari ini (R34)'])assert(t.includes(s),s);
+        const ut=page.locator('[data-universe-table] tbody tr');assert.equal(await ut.count(),UNIVERSE.length);
+        assert.deepEqual((await ut.allInnerTexts()).map(x=>x.split(/\s+/)[1]),UNIVERSE.map(x=>x.symbol));
         const [dl]=await Promise.all([page.waitForEvent('download'),page.locator('[data-action="download-audit"]').click()]);
         const body=fs.readFileSync(await dl.path(),'utf8').trim().split('\n');assert(body.length>10);body.forEach(l=>JSON.parse(l));
         await common(page,viewport);
@@ -215,7 +240,7 @@ const nav=async(page,viewport,screen)=>{await page.locator((viewport.width<768?'
         assert(await page.locator('.tabbar').isVisible());assert(!(await page.locator('.rail').isVisible()));
       });
       await run(`[${viewport.width}px] Tanpa error JavaScript / tombol order`,async()=>{
-        assert.deepEqual(errors,[]);
+        assert.deepEqual(errors,[]);assert.deepEqual(OUTSIDE,[],'candle pair di luar universe diunduh');
         const btn=await page.locator('button,a').allInnerTexts();assert(!btn.some(b=>/^(beli|jual|buy|sell|order|long now|short now)$/i.test(b.trim())));
       });
       await context.close();
@@ -233,9 +258,21 @@ const nav=async(page,viewport,screen)=>{await page.locator((viewport.width<768?'
       const {context,page,errors}=await setup(browser,{width:1280,height:900},{eiFail:true});
       await page.evaluate(()=>localStorage.setItem('malomo_v7_exec',JSON.stringify({capital:'1000',riskPct:'0.5',costBps:'18'})));
       await page.reload();await page.locator('[data-screen="portofolio"]').first().click();
-      await page.waitForSelector('#slots .exec[data-exec-status="UNROUNDED"]',{timeout:20000});
+      // exchangeInfo dicoba ulang ±50 detik; universe tidak bisa disaring tanpa daftar kontrak → cadangan 6 pair inti + peringatan
+      await page.waitForSelector('#slots .exec[data-exec-status="UNROUNDED"]',{timeout:120000});
+      await page.locator('[data-screen="siklus"]').first().click();await page.waitForSelector('[data-count="ENTRY_CONSIDER"]');
+      assert((await page.locator('main').innerText()).includes('Universe 100 pair belum bisa ditetapkan'),'peringatan universe');
+      await page.locator('[data-screen="portofolio"]').first().click();
       assert.equal(await page.locator('#slots .exec [data-action="copy-val"]').count(),0);
       const t=await page.locator('main').innerText();assert(t.includes('Belum dibulatkan')&&t.includes('jangan disalin sebagai order'));
+      assert.deepEqual(errors,[]);await context.close();
+    });
+    await run('Universe gagal ditetapkan (ticker/24hr gagal) → peringatan, hanya 6 pair inti dihitung, skor sama dengan engine',async()=>{
+      const {context,page,errors}=await setup(browser,{width:1280,height:900},{tickerFail:true});
+      await page.waitForSelector('[data-count="ENTRY_CONSIDER"]',{timeout:90000});
+      const t=await page.locator('main').innerText();assert(t.includes('Universe 100 pair belum bisa ditetapkan'),'peringatan universe');
+      const rows=await page.locator('.cand-table tbody tr').allInnerTexts();
+      assert.equal(rows.length,coreOnly.cycle.records.length);assert(rows.every(x=>C.PAIRS.some(p=>x.includes(p))));
       assert.deepEqual(errors,[]);await context.close();
     });
     await run('Semua pair gagal saat pertama dibuka → pesan FETCH_FAILED, tanpa skor palsu',async()=>{

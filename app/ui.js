@@ -20,12 +20,23 @@
 
   // ---------- R33 label rezim BTC (informatif, bukan gate) ----------
   const RG={ALIGNED:['Searah BTC','primary'],OPPOSED:['Berlawanan dengan BTC','warn'],BTC_TRANSITION:['BTC transisi','neutral'],UNAVAILABLE:['Rezim BTC: —','neutral']};
-  const regimeOf=(state,r)=>state&&state.analyses?M.cycle.btcRegime(state.analyses,r):null;
+  const regimeOf=(state,r)=>!state?null:state.regimes?(state.regimes[recId(r)]||null):state.analyses?M.cycle.btcRegime(state.analyses,r):null;
   function regimeChip(rg){
     if(!rg)return '';const [t,tone]=RG[rg.code]||RG.UNAVAILABLE;
     return `<span class="chip ${tone} rg" data-regime="${e(rg.code)}" title="Informasi saja, bukan gate. Struktur M1 BTC: ${e(L.STRUCT[rg.label]||'—')}">${e(t)}</span>`;
   }
   const REGIME_NOTE='Informasi saja. Backtest 2024–2026: sinyal searah BTC rata-rata lebih baik di ketiga tahun, tetapi belum signifikan secara statistik. Altcoin bisa bergerak sendiri.';
+
+  // ---------- R34 universe 100 pair ----------
+  const rankMap=state=>{const u=state&&state.universeInfo;const m=new Map();if(u&&u.source!=='core')for(const x of u.list)m.set(x.symbol,x.rank);return m;};
+  const rankTag=(rk,sym)=>rk.has(sym)?`<span class="muted small" title="Peringkat volume harian (universe R34)"> #${rk.get(sym)}</span>`:'';
+  function universeLine(state){
+    const u=state&&state.universeInfo;if(!u)return '';
+    const day=L.date(u.dayStart);
+    if(u.source==='core')return `<div class="warnbox">⚠ Universe 100 pair belum bisa ditetapkan (${e(u.error||'')}). Sementara hanya 6 pair inti yang dihitung; dicoba ulang tiap 5 menit.</div>`;
+    if(u.source==='stale')return `<div class="warnbox">⚠ Universe hari ini belum bisa ditetapkan (${e(u.error||'')}). Memakai daftar ${e(day)}; dicoba ulang tiap 5 menit.</div>`;
+    return `<div class="muted small" data-universe="${e(String(u.list.length))}">Universe: <b>${u.list.length} pair</b> volume harian tertinggi · ditetapkan close 08:00 WITA ${e(day)} · hard gate (pair lain tidak dihitung)</div>`;
+  }
 
   // ---------- R32 rencana eksekusi siap salin ----------
   const usdt=v=>fin(v)?v.toFixed(2)+' USDT':'—';
@@ -85,13 +96,13 @@
   // ---------- S1 Siklus 4H ----------
   function counts(recs){const c={};for(const r of recs)c[r.status]=(c[r.status]||0)+1;return c;}
   function siklus(state,view){
-    if(!state)return '<div class="empty">Memuat candle 4H enam pair dari Binance…</div>';
+    if(!state)return '<div class="empty">Memuat universe pair dan candle 4H dari Binance…</div>';
     const cy=state.cycle,recs=cy.records,c=counts(recs),closeTxt=L.time(cy.T);
     const cards=[['ENTRY_CONSIDER','Layak dipertimbangkan',c.ENTRY_CONSIDER],['REJECTED_RISK','Ditolak risiko',c.REJECTED_RISK],['REJECTED_DIRECTION','Ditolak arah',c.REJECTED_DIRECTION],
       ['COLLIDE','Bentrok',(c.CONFLICTING_DIRECTIONS||0)+(c.MULTI_METHOD_COLLISION||0)],['NO_ENTRY','Tidak ada entry',c.NO_ENTRY]];
     if(c.REJECTED_INTEGRITY)cards.push(['REJECTED_INTEGRITY','Ditolak integritas',c.REJECTED_INTEGRITY]);
     if(c.CLOSE_CANDIDATE)cards.push(['CLOSE_CANDIDATE','Menunggu open',c.CLOSE_CANDIDATE]);
-    let html=`<div class="section"><div class="section-head"><h2>Siklus close ${e(closeTxt)}</h2><span class="muted small">${e(L.date(cy.T))} · M3 ${e(L.score(cy.summary.m3))} / 100 (sama untuk semua kandidat)</span></div>`;
+    let html=`<div class="section"><div class="section-head"><h2>Siklus close ${e(closeTxt)}</h2><span class="muted small">${e(L.date(cy.T))} · M3 ${e(L.score(cy.summary.m3))} / 100 (sama untuk semua kandidat)</span></div>${universeLine(state)}`;
     if(cy.summary.data_status!=='OK')html+=`<div class="warnbox">⚠ Data: ${e(cy.summary.fetch_failed.join(', '))} FETCH_FAILED — skor siklus ini berstatus DATA_INCOMPLETE sementara; dicoba ulang 30/60/120 detik.</div>`;
     html+=`<div class="cards">${cards.map(([k,n,v])=>`<div class="stat" data-count="${k}"><div class="k">${e(n)}</div><div class="v">${v||0}</div></div>`).join('')}</div></div>`;
     if(!c.ENTRY_CONSIDER){
@@ -112,20 +123,20 @@
     const f=view.filters,opts=(name,vals,lab)=>`<label>${name}<select data-filter="${name.toLowerCase()}"><option value="">Semua</option>${vals.map(v=>`<option value="${e(v)}"${f[key(name)]===v?' selected':''}>${e(lab?lab[v]||v:v)}</option>`).join('')}</select></label>`;
     const key=n=>({Pair:'pair',Arah:'side',Keluarga:'family',Status:'status',BTC:'btc'}[n]);
     const uniq=k=>[...new Set(recs.map(r=>r[k]))].sort();
-    const rgOf=r=>regimeOf(state,r),rows=filterRecs(recs,f,rgOf);
+    const rgOf=r=>regimeOf(state,r),rows=filterRecs(recs,f,rgOf),rk=rankMap(state);
     let html=`<div class="section"><div class="section-head"><h3>Kandidat close ini</h3><span class="muted small">Urutan = tie-break PRD §8.1.5 (M6↓, M2 kualitas↓, M1↓, simbol, LONG dulu, keluarga)</span></div>
       <div class="filters">${opts('Pair',uniq('symbol'))}${opts('Arah',['LONG','SHORT'])}${opts('Keluarga',uniq('signal_family'),L.FAMILY)}${opts('Status',uniq('status'),L.STATUS)}<label>BTC<select data-filter="btc"><option value="">Semua</option><option value="ALIGNED"${f.btc==='ALIGNED'?' selected':''}>Searah BTC saja</option></select></label></div>`;
     html+=`<div class="table-wrap cand-table"><table><thead><tr><th class="num">#</th><th>Pair</th><th>Arah</th><th>Keluarga</th><th>M6 (indeks)</th><th class="num" title="Pembeda utama antar kandidat, hanya tampilan">M1 + M2q</th><th>Status</th><th title="Informasi saja, bukan gate">Rezim BTC</th><th>Alasan</th><th>Waktu</th></tr></thead><tbody>`;
     for(const r of rows){
       const sel=view.selected===recId(r)?' sel':'',m6=r.scores.m6_confluense_500;
-      html+=`<tr class="row${sel}" data-rec="${e(recId(r))}"><td class="num">${r.rank_provisional??'—'}</td><td>${e(r.symbol)}</td><td>${side(r.side)}</td><td>${fam(r.signal_family)}</td>
+      html+=`<tr class="row${sel}" data-rec="${e(recId(r))}"><td class="num">${r.rank_provisional??'—'}</td><td>${e(r.symbol)}${rankTag(rk,r.symbol)}</td><td>${side(r.side)}</td><td>${fam(r.signal_family)}</td>
         <td><div class="m6cell">${bar(m6,500)}<span class="mono">${fin(m6)?e(L.score(m6))+' / 500':'— / 500'}</span></div></td>
         <td class="num">${fin(r.scores.m1_plus_m2q_0_180_display_only)?e(L.score(r.scores.m1_plus_m2q_0_180_display_only))+' / 180':'—'}</td>
         <td>${chip(r.status,L.STATUS)}</td><td>${regimeChip(rgOf(r))||'<span class="muted small">—</span>'}</td><td>${reasonChips(r.reasons)}</td><td class="small">${e(L.time(ms(r.confirmation_utc)))}</td></tr>`;
     }
     html+='</tbody></table></div><div class="cand-cards">';
     for(const r of rows){const m6=r.scores.m6_confluense_500;
-      html+=`<div class="cand-card" data-rec="${e(recId(r))}"><div class="top"><b>${e(r.symbol)}</b>${side(r.side)}</div>
+      html+=`<div class="cand-card" data-rec="${e(recId(r))}"><div class="top"><b>${e(r.symbol)}</b>${rankTag(rk,r.symbol)}${side(r.side)}</div>
         <div class="m6cell">${bar(m6,500)}<span class="mono">${fin(m6)?e(L.score(m6))+' / 500':'— / 500'}</span></div>
         <div class="chips">${chip(r.status,L.STATUS)}<span class="chip neutral">${e(L.FAMILY[r.signal_family]||r.signal_family)}</span>${regimeChip(rgOf(r))}</div>${reasonChips(r.reasons)}</div>`;}
     html+='</div>';
@@ -297,12 +308,12 @@
   function pasar(state){
     if(!state)return '<div class="empty">Memuat…</div>';
     const cx=state.context;
-    let h=`<div class="section"><div class="section-head"><h2>Konteks Pasar</h2><span class="muted small">Candle 4H yang sudah close · pivot terkonfirmasi (titik) · level event menunggu (garis putus)</span></div><div class="charts">`;
+    let h=`<div class="section"><div class="section-head"><h2>Konteks Pasar</h2><span class="muted small">6 pair inti + pair yang punya kandidat/posisi · candle 4H close · pivot (titik) · level event menunggu (garis putus)</span></div><div class="charts">`;
     for(const r of cx.rows)h+=`<div class="chart"><div class="section-head" style="margin:0 0 4px"><b>${e(r.symbol)}</b><span class="mono small">${e(L.price(r.close))}</span></div>${miniChart(r)}</div>`;
     h+=`</div></div><div class="section"><h3 style="margin-bottom:8px">M1 per pair (candle terakhir)</h3><div class="table-wrap"><table><thead><tr><th>Pair</th><th>Struktur</th><th class="num">TE14</th><th class="num">ADX14</th><th class="num">Persentil NATR</th><th class="num">M1</th></tr></thead><tbody>`;
     for(const r of cx.rows){const m=r.m1,cp=m&&m.components;
       h+=`<tr><td>${e(r.symbol)}</td><td>${m?chip(m.direction||'INCOMPLETE',L.STRUCT):'—'}</td><td class="num">${cp?cp.te14.toFixed(3):'—'}</td><td class="num">${cp?cp.adx14.toFixed(2):'—'}</td><td class="num">${cp?cp.natr_pct.toFixed(3):'—'}</td><td class="num">${m&&fin(m.score)?e(L.score(m.score))+' / 100':'—'}</td></tr>`;}
-    h+=`</tbody></table></div></div><div class="section"><div class="section-head"><h3>M3 — dependensi basket</h3><span class="mono">${e(L.score(cx.m3.score))} / 100</span></div>`;
+    h+=`</tbody></table></div></div><div class="section"><div class="section-head"><h3>M3 — dependensi basket 6 pair inti</h3><span class="mono">${e(L.score(cx.m3.score))} / 100</span></div>`;
     if(cx.matrix){
       const P=cx.pairs,n=P.length,short=s=>s.replace(/USDT$/,'');
       h+=`<div class="heat" style="grid-template-columns:repeat(${n+1},1fr)"><div class="h"></div>${P.map(p=>`<div class="h">${e(short(p))}</div>`).join('')}`;
@@ -322,6 +333,9 @@
     for(const x of state.health){const rec=[];if(x.recovery.m3)rec.push('M3 pulih dalam '+x.recovery.m3+' candle');if(x.recovery.m1)rec.push('M1 dalam '+x.recovery.m1);if(x.recovery.rvol)rec.push('RVOL dalam '+x.recovery.rvol);
       h+=`<tr><td>${e(x.symbol)}</td><td class="small">${e(L.dateTime(x.lastCloseMs))}</td><td class="num">${x.candles}</td><td class="num">${x.gaps}</td><td>${x.fetch==='OK'?'<span class="chip primary">OK</span>':chip('FETCH_FAILED',L.REASON)}</td><td class="small">${e(rec.join(' · ')||'—')}</td></tr>`;}
     h+='</tbody></table></div></div>';
+    const u=state.universeInfo;
+    if(u){h+=`<div class="section"><div class="section-head"><h3>Universe hari ini (R34)</h3><span class="muted small">${u.source==='live'?'ditetapkan':u.source==='cache'?'tersimpan':u.source==='stale'?'daftar lama':'6 pair inti'} · close harian ${e(L.date(u.dayStart))} 08:00 WITA</span></div>${universeLine(state)}
+      <div class="table-wrap"><table data-universe-table><thead><tr><th class="num">#</th><th>Pair</th><th class="num">Volume harian (USDT)</th></tr></thead><tbody>${u.list.map(x=>`<tr><td class="num">${x.rank??'—'}</td><td>${e(x.symbol)}</td><td class="num">${e(L.compactUsd(x.quoteVolume))}</td></tr>`).join('')}</tbody></table></div></div>`;}
     const cal=state.calibration,files=meta&&meta.files||{};
     h+=`<div class="section"><h3 style="margin-bottom:8px">Kalibrasi aktif</h3><dl class="kv"><dt>Kebijakan</dt><dd>${e(cal.policy)} (array beku, tanpa fitting ulang)</dd>
       ${Object.entries(cal.families).map(([f,x])=>`<dt>${e(L.FAMILY[f])}</dt><dd>${x?e(x.version)+' · n='+x.n:'—'}</dd>`).join('')}

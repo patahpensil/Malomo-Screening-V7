@@ -10,9 +10,12 @@
   'use strict';
   const fin=x=>typeof x==='number'&&Number.isFinite(x);
   // Asumsi maintenance margin rate konservatif (nilai pasti hanya lewat endpoint berkunci, tidak dipakai) — R32.3.
-  const MMR=Object.freeze({BTCUSDT:0.004,ETHUSDT:0.005,DEFAULT:0.01});
-  // Batas leverage pribadi pengguna (R32.3): BTC 150×, ETH 125×, alt 50×. Leverage aman hampir selalu jauh di bawahnya.
-  const MAX_LEV=Object.freeze({BTCUSDT:150,ETHUSDT:125,DEFAULT:50});
+  // R34: alt di luar 30 besar volume (atau peringkat tidak diketahui) memakai MMR 2,5% dan batas 20× — koin kecil punya
+  // bracket margin lebih ketat di Binance. Hanya membuat leverage aman lebih kecil; tidak menyentuh skor.
+  const MMR=Object.freeze({BTCUSDT:0.004,ETHUSDT:0.005,DEFAULT:0.01,SMALL:0.025});
+  // Batas leverage pribadi pengguna (R32.3): BTC 150×, ETH 125×, alt 50× (alt di luar 30 besar 20×).
+  const MAX_LEV=Object.freeze({BTCUSDT:150,ETHUSDT:125,DEFAULT:50,SMALL:20});
+  const TOP_TIER=30;
   const LIMITS=Object.freeze({riskMin:0.5,riskMax:1,costMin:0,costMax:50,capitalMax:1e9});
   const DEFAULTS=Object.freeze({capital:null,riskPct:0.5,costBps:18});
   const RULES_TTL_MS=24*3600*1000;
@@ -74,14 +77,15 @@
     return {ok:!Object.keys(errors).length,capital:errors.capital?null:capital,riskPct:errors.riskPct?null:riskPct,costBps:errors.costBps?null:costBps,errors};
   }
 
-  const mmrOf=sym=>MMR[sym]??MMR.DEFAULT;
-  const maxLevOf=sym=>MAX_LEV[sym]??MAX_LEV.DEFAULT;
+  const big=rank=>Number.isInteger(rank)&&rank>=1&&rank<=TOP_TIER;
+  const mmrOf=(sym,rank)=>MMR[sym]??(big(rank)?MMR.DEFAULT:MMR.SMALL);
+  const maxLevOf=(sym,rank)=>MAX_LEV[sym]??(big(rank)?MAX_LEV.DEFAULT:MAX_LEV.SMALL);
   /* Leverage maksimum aman: floor(1 / (2·jarak_stop + MMR)), minimal 1×, maksimal batas pribadi.
      Menjamin perkiraan jarak likuidasi (1/L − MMR) ≥ 2 × jarak stop. */
-  function safeLeverage(stopFrac,sym){
+  function safeLeverage(stopFrac,sym,rank){
     if(!(fin(stopFrac)&&stopFrac>0))return null;
-    const mmr=mmrOf(sym);
-    return Math.max(1,Math.min(maxLevOf(sym),Math.floor(1/(2*stopFrac+mmr)+1e-9)));
+    const mmr=mmrOf(sym,rank);
+    return Math.max(1,Math.min(maxLevOf(sym,rank),Math.floor(1/(2*stopFrac+mmr)+1e-9)));
   }
 
   /* Rencana siap salin untuk satu record/posisi PRD.
@@ -92,7 +96,7 @@
     if(!p||!['LONG','SHORT'].includes(p.side)||![p.entry,p.stop,p.target].every(v=>fin(v)&&v>0))return Object.assign(base,{status:'NO_PLAN'});
     const st=validateSettings(settingsRaw);
     if(!st.ok)return Object.assign(base,{status:st.errors.capital==='EMPTY'&&Object.keys(st.errors).length===1?'NEED_SETTINGS':'INVALID_SETTINGS',errors:st.errors});
-    const s=p.side==='LONG'?1:-1,mmr=mmrOf(p.symbol);
+    const rank=rules&&Number.isInteger(rules.rank)?rules.rank:null,s=p.side==='LONG'?1:-1,mmr=mmrOf(p.symbol,rank);
     let entry,stop,target,priceStr,distUnits=null,scale=1;
     const tg=rules?makeGrid(rules.tickSize):null,sg=rules?makeGrid(rules.stepSize):null;
     if(tg&&sg){
@@ -114,7 +118,7 @@
     const qtyRaw=budget/lossPerUnit;
     let qty,qtyStr=null;
     if(sg){const q=snap(qtyRaw,sg,'down');qty=q.num;qtyStr=q.str;}else qty=qtyRaw;
-    const stopFrac=dist/entry,lev=safeLeverage(stopFrac,p.symbol);
+    const stopFrac=dist/entry,lev=safeLeverage(stopFrac,p.symbol,rank);
     const liqFrac=1/lev-mmr;
     const notional=qty*entry,margin=notional/lev;
     const out=Object.assign(base,{entry,stop,target,priceStr,qty,qtyStr,qtyRaw,budget,
@@ -135,5 +139,5 @@
     INVALID_SETTINGS:'Pengaturan tidak valid',NOT_EXECUTABLE:'Tidak bisa dieksekusi dengan modal ini',PAIR_NOT_TRADING:'Pair tidak sedang diperdagangkan',NO_PLAN:'Rencana belum tersedia'};
   const REASON_TEXT={BELOW_MIN_QTY:'qty di bawah minimum pair',ABOVE_MAX_QTY:'qty di atas maksimum pair',BELOW_MIN_NOTIONAL:'notional di bawah minimum pair',
     MARGIN_EXCEEDS_CAPITAL:'margin melebihi modal',PLAN_GEOMETRY:'urutan harga SL/entry/TP tidak sah setelah pembulatan',PAIR_NOT_TRADING:'status pair bukan TRADING'};
-  return {MMR,MAX_LEV,LIMITS,DEFAULTS,RULES_TTL_MS,decimalsOf,makeGrid,snap,parseRules,validateSettings,safeLeverage,plan,mmrOf,STATUS_TEXT,REASON_TEXT};
+  return {MMR,MAX_LEV,TOP_TIER,LIMITS,DEFAULTS,RULES_TTL_MS,decimalsOf,makeGrid,snap,parseRules,validateSettings,safeLeverage,plan,mmrOf,STATUS_TEXT,REASON_TEXT};
 });

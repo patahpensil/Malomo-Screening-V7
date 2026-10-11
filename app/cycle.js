@@ -23,6 +23,12 @@
       ct:Number(k[6]),quoteVolume:Number(k[7]),trades:Number(k[8]),takerBuyBase:Number(k[9])};
   }
   const lastClosedT=now=>Math.floor(now/H4)*H4;   // close candle terakhir = open candle yang sedang berjalan
+  /* Gabung candle lama + candle terbaru (pengambilan inkremental R34): kunci = open time, data terbaru menang,
+     urut naik, dibatasi `limit` candle terakhir. Celah tetap terdeteksi engine (CONFIRMED_GAP), tidak diisi. */
+  function mergeCandles(old,fresh,limit=KLINE_LIMIT){
+    const m=new Map();for(const x of old||[])m.set(x.t,x);for(const x of fresh||[])m.set(x.t,x);
+    return [...m.values()].sort((a,b)=>a.t-b.t).slice(-limit);
+  }
 
   /* Outcome riset posisi (§6 butir 4, §8.1.8): stop/target hanya mencatat hasil dan TIDAK membebaskan slot.
      Candle 4H yang sudah close di [entry, entry+24 jam). Stop dievaluasi lebih dahulu bila keduanya tersentuh. */
@@ -39,16 +45,22 @@
     return {code:'OPEN',atMs:null,r:null,candlesSeen:win.length,of:need};
   }
 
-  function buildState({rawBySymbol,now,frozen,failed=[],pairs=PAIRS,frozenMeta=null}){
+  /* pairs   = basket M3 (PRD §5: enam pair inti, TIDAK berubah).
+     symbols = semua pair yang dianalisis (universe R34 ∪ pair inti ∪ posisi berjalan); default = pairs.
+     gate    = {fromMs, allowed} (R34 hard gate): untuk close T ≥ fromMs hanya pair dalam `allowed` yang diteruskan ke
+               decide; close sebelumnya memakai semua pair yang diunduh (riwayat replay = perkiraan, PRD §17).
+     Rumus skor tidak berubah: decide menerima peta analisis yang sama bentuknya, hanya himpunan pair yang disaring. */
+  function buildState({rawBySymbol,now,frozen,failed=[],pairs=PAIRS,symbols=null,gate=null,frozenMeta=null}){
     const T=lastClosedT(now),analyses=new Map(),rowsAt=new Map();
-    for(const s of pairs){
+    const syms=[...new Set([...(symbols||pairs),...pairs])];
+    for(const s of syms){
       const rows=rawBySymbol&&rawBySymbol[s];if(!rows||!rows.length)continue;
       analyses.set(s,P.analyzeSymbol(s,rows,now,{archive:false}));
       rowsAt.set(s,new Map(rows.filter(r=>r.t<=now).map(r=>[r.t,r])));
     }
     // Pair yang gagal diambil dan datanya belum mencakup close terakhir → FETCH_FAILED untuk siklus ini.
     const lastCloseOf=s=>{const a=analyses.get(s);return a&&a.c.length?a.c[a.c.length-1].t+H4:null;};
-    const fetchFailed=pairs.filter(s=>failed.includes(s)&&!(lastCloseOf(s)>=T));
+    const fetchFailed=syms.filter(s=>failed.includes(s)&&!(lastCloseOf(s)>=T));
     const provider=M2.provider({frozen});
     const closes=P.closesOf(analyses);
     // T yang perlu diputuskan: setiap close yang punya event CONFIRMED + close terakhir.
@@ -57,9 +69,13 @@
     for(const [,a] of analyses)for(const k of a.byTc.keys()){const t=a.c[k].t+H4;if(t<=T)Ts.add(t);}
     const order=[...Ts].sort((a,b)=>a-b);
     let portfolio={positions:[]},current=null;const log=[],history=[];
+    const allowedAt=Tk=>gate&&Tk>=gate.fromMs?gate.allowed:null;
+    const gated=new Map();   // cache peta tersaring (satu untuk seluruh close ≥ fromMs)
+    const analysesAt=Tk=>{const al=allowedAt(Tk);if(!al)return analyses;
+      if(!gated.has('g')){const m=new Map();for(const [s,a] of analyses)if(al.has(s))m.set(s,a);gated.set('g',m);}return gated.get('g');};
     for(const Tk of order){
       const entryOpen=s=>{const r=rowsAt.get(s)&&rowsAt.get(s).get(Tk);return r&&fin(r.open)&&r.open>0?r.open:null;};
-      const res=P.decide(Tk,analyses,{provider,portfolio,entryOpen,log,pairs,closes});
+      const res=P.decide(Tk,analysesAt(Tk),{provider,portfolio,entryOpen,log,pairs,closes});
       portfolio=res.portfolio;
       for(const r of res.records)history.push(r);
       if(Tk===T)current=res;
@@ -96,18 +112,23 @@
       rejections:history.filter(r=>r.status==='REJECTED_RISK').reverse(),rejectionCounts:{},
       replayFromMs:order.length?firstCandleMs(analyses):null,equity:R.MANDATE.equity};
     for(const r of book.rejections)for(const x of r.reasons)book.rejectionCounts[x]=(book.rejectionCounts[x]||0)+1;
-    return {now,T,cycle,history,book,board:board(analyses,history,T),context:context(analyses,T,pairs),
-      health:health(analyses,pairs,T,fetchFailed,failed),calibration:calibration(frozen,frozenMeta),log,analyses};
+    // Pair yang ditampilkan: universe hari ini (atau semua bila tanpa gate) + pair posisi berjalan.
+    const shown=new Set(gate?[...gate.allowed].filter(s=>analyses.has(s)):syms);for(const p of active)shown.add(p.symbol);
+    const extra=[...new Set([...current.records.map(r=>r.symbol),...active.map(p=>p.symbol)])].filter(s=>!pairs.includes(s)).sort();
+    return {now,T,cycle,history,book,board:board(analyses,history,T,shown),context:context(analyses,T,pairs,extra),
+      health:health(analyses,syms,T,fetchFailed,failed),calibration:calibration(frozen,frozenMeta),log,analyses,
+      universe:gate?{fromMs:gate.fromMs,symbols:[...gate.allowed]}:null,symbols:syms};
   }
   const firstCandleMs=analyses=>{let m=Infinity;for(const [,a] of analyses)if(a.c.length)m=Math.min(m,a.c[0].t);return fin(m)?m:null;};
 
   // S3 Papan Event: event tunggu (tanpa skor) + event yang selesai dalam BOARD_LOOKBACK candle terakhir.
-  function board(analyses,history,T){
+  function board(analyses,history,T,shown=null){
     const recBy=new Map(history.map(r=>[r.symbol+'|'+r.side+'|'+r.signal_family+'|'+r.decision_available_utc,r]));
     const cols={waiting:[],confirmed:[],conflict:[],ended:[],research:[]};
-    for(const p of P.pending(analyses))cols.waiting.push(Object.assign({},p,{family:p.signal_family}));
+    for(const p of P.pending(analyses))if(!shown||shown.has(p.symbol))cols.waiting.push(Object.assign({},p,{family:p.signal_family}));
     const since=T-BOARD_LOOKBACK*H4;
     for(const [s,a] of analyses)for(const ev of a.events){
+      if(shown&&!shown.has(s))continue;
       if(ev.endIdx===null||ev.endIdx===undefined)continue;
       const endMs=a.c[ev.endIdx].t+H4;if(endMs<=since||endMs>T)continue;
       const card={symbol:s,side:ev.side,signal_family:ev.family,event_status:ev.status,level:ev.level,endMs,
@@ -123,10 +144,11 @@
     return cols;
   }
 
-  // S5 Konteks Pasar: M1 per pair pada candle terakhir, M3 + matriks korelasi (60 return berakhir t−1) dan J (180 return).
-  function context(analyses,T,pairs){
+  // S5 Konteks Pasar: M1 per pair pada candle terakhir (6 pair inti + pair yang punya kandidat/posisi), M3 + matriks
+  // korelasi basket inti (60 return berakhir t−1) dan J (180 return).
+  function context(analyses,T,pairs,extra=[]){
     const rows=[];
-    for(const s of pairs){
+    for(const s of [...pairs,...extra]){
       const a=analyses.get(s);if(!a||!a.c.length){rows.push({symbol:s,m1:null,chart:null});continue;}
       const k=a.c.length-1,m1=a.m1At(k),from=Math.max(0,k-CHART_CANDLES+1);
       const piv=[...a.piv.highs,...a.piv.lows].filter(p=>p.confirm<=k&&p.i>=from).map(p=>({i:p.i-from,price:p.price,type:p.type}));
@@ -181,5 +203,19 @@
     return {code:aligned?'ALIGNED':'OPPOSED',label};
   }
 
-  return {KLINE_LIMIT,BOARD_LOOKBACK,toCandle,lastClosedT,outcome,buildState,auditLines,publicRecord,btcRegime};
+  /* State siap kirim dari Web Worker (structured clone): peta analisis (berisi fungsi) dibuang, label rezim BTC R33
+     dihitung lebih dulu per record. Tidak ada angka yang dihitung ulang atau diubah. */
+  const recKey=r=>r.symbol+'|'+r.side+'|'+r.signal_family+'|'+r.decision_available_utc;
+  function toView(st){
+    const regimes={};for(const r of st.history){const rg=btcRegime(st.analyses,r);if(rg)regimes[recKey(r)]=rg;}
+    // Field internal engine (awalan "_") tidak termasuk kontrak §10 dan tidak dipakai tampilan; daftar pivot M1 diringkas ke label.
+    const slim=new Map();const sl=r=>{if(!r)return r;if(!slim.has(r))slim.set(r,publicRecord(r));return slim.get(r);};
+    const pos=p=>Object.assign({},p,{record:sl(p.record)});
+    const cycle=Object.assign({},st.cycle,{records:st.cycle.records.map(sl)});
+    const book=Object.assign({},st.book,{active:st.book.active.map(pos),closed:st.book.closed.map(pos),rejections:st.book.rejections.map(sl)});
+    const rows=st.context.rows.map(x=>x.m1?Object.assign({},x,{m1:Object.assign({},x.m1,{structure:{label:x.m1.structure&&x.m1.structure.label}})}):x);
+    const o=Object.assign({},st,{regimes,history:st.history.map(sl),cycle,book,context:Object.assign({},st.context,{rows})});
+    delete o.analyses;return o;
+  }
+  return {KLINE_LIMIT,BOARD_LOOKBACK,toCandle,lastClosedT,mergeCandles,outcome,buildState,auditLines,publicRecord,btcRegime,toView,recKey};
 });

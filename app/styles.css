@@ -221,3 +221,5 @@ pre.json{background:var(--bg);border:1px solid var(--border);border-radius:var(-
 .exf.bad small{color:#f2a29d;}
 .chip.rg{font-size:11px;}
 @media (max-width:767px){.exv-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.exf-grid{grid-template-columns:1fr;}}
+
+[data-universe]{margin:0 0 10px;}

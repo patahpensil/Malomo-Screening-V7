@@ -16,7 +16,7 @@ function isMultiple(str,stepStr){
   const toInt=v=>{const [a,b='']=v.split('.');return BigInt(a+b.padEnd(dec,'0'));};
   const st=toInt(stepStr);return st>0n&&toInt(str)%st===0n;
 }
-const rulesFor=(sym,tick,step,minQty,minNotional,status='TRADING')=>({symbol:sym,status,tickSize:tick,stepSize:step,minQty,maxQty:Infinity,minNotional});
+const rulesFor=(sym,tick,step,minQty,minNotional,status='TRADING',rank=10)=>({symbol:sym,status,tickSize:tick,stepSize:step,minQty,maxQty:Infinity,minNotional,rank});
 const SET={capital:'1000',riskPct:'0.5',costBps:'18'};
 
 // ---------- desimal & pembulatan ----------
@@ -120,11 +120,23 @@ test('Tidak bisa dieksekusi: min notional, min qty, pair bukan TRADING, margin >
   const geo=X.plan({symbol:'SOLUSDT',side:'LONG',entry:200.004,stop:200.001,target:200.009},SET,rulesFor('SOLUSDT','0.01','0.01',0.01,5));
   assert.equal(geo.status,'NOT_EXECUTABLE');assert(geo.reasons.includes('PLAN_GEOMETRY'));
 });
-test('Leverage aman: rumus, batas bawah 1×, batas pribadi BTC 150× / ETH 125× / alt 50×',()=>{
+test('Leverage aman: rumus, batas bawah 1×, batas pribadi BTC 150× / ETH 125× / alt 30 besar 50× / alt lain 20×',()=>{
   assert.equal(X.safeLeverage(0.0186,'BTCUSDT'),Math.floor(1/(2*0.0186+0.004)));
   assert.equal(X.safeLeverage(0.0256,'ETHUSDT'),Math.floor(1/(2*0.0256+0.005)));
-  assert.equal(X.safeLeverage(0.6,'SOLUSDT'),1);assert.equal(X.safeLeverage(0,'SOLUSDT'),null);
-  assert.equal(X.safeLeverage(1e-6,'BTCUSDT'),150);assert.equal(X.safeLeverage(1e-6,'ETHUSDT'),125);assert.equal(X.safeLeverage(1e-6,'XRPUSDT'),50);
+  assert.equal(X.safeLeverage(0.03,'SOLUSDT',5),Math.floor(1/(0.06+0.01)));
+  assert.equal(X.safeLeverage(0.03,'WIFUSDT',45),Math.floor(1/(0.06+0.025)),'peringkat > 30 → MMR 2,5%');
+  assert.equal(X.safeLeverage(0.03,'WIFUSDT',null),Math.floor(1/(0.06+0.025)),'peringkat tidak diketahui → konservatif');
+  assert.equal(X.safeLeverage(0.6,'SOLUSDT',5),1);assert.equal(X.safeLeverage(0,'SOLUSDT',5),null);
+  assert.equal(X.safeLeverage(1e-6,'BTCUSDT'),150);assert.equal(X.safeLeverage(1e-6,'ETHUSDT'),125);assert.equal(X.safeLeverage(1e-6,'XRPUSDT',3),50);
+  assert.equal(X.safeLeverage(1e-6,'XRPUSDT',31),20);assert.equal(X.safeLeverage(1e-6,'XRPUSDT'),20);
+  assert.equal(X.mmrOf('BTCUSDT',90),0.004,'BTC/ETH tetap memakai MMR sendiri');
+});
+test('Rencana memakai peringkat universe dari aturan pair: pair kecil → leverage aman lebih rendah, risiko tetap sama',()=>{
+  const inp={symbol:'WIFUSDT',side:'LONG',entry:2,stop:1.94,target:2.12};
+  const a=X.plan(inp,SET,rulesFor('WIFUSDT','0.0001','1',1,5,'TRADING',12)),b=X.plan(inp,SET,rulesFor('WIFUSDT','0.0001','1',1,5,'TRADING',77));
+  assert.equal(a.status,'READY');assert.equal(b.status,'READY');assert(b.leverage<a.leverage,a.leverage+' vs '+b.leverage);
+  assert.equal(a.qtyStr,b.qtyStr,'qty & risiko tidak bergantung leverage');assert.equal(b.mmr,0.025);
+  assert(b.liqPct/100>=2*b.stopPct/100);
 });
 
 // ---------- properti acak (uang nyata: invarian tidak boleh dilanggar satu kali pun) ----------
@@ -153,7 +165,7 @@ test('Properti 5.000 kasus acak: risiko nyata ≤ batas, kelipatan tick/step tep
     assert(Number(set.riskPct)<=1+1e-12,"risk");
     // leverage aman: perkiraan jarak likuidasi ≥ 2 × jarak SL
     const sf=Math.abs(E-SL)/E;assert(Number.isInteger(p.leverage)&&p.leverage>=1);
-    assert(1/p.leverage-X.mmrOf(sym)>=2*sf-1e-12||p.leverage===1,`L ${p.leverage} sf ${sf}`);
+    assert.equal(p.mmr,X.mmrOf(sym,10));assert(1/p.leverage-p.mmr>=2*sf-1e-12||p.leverage===1,`L ${p.leverage} sf ${sf}`);
     if(p.status==='READY')ready++;
   }
   assert(ready>1000,'kasus READY terlalu sedikit: '+ready);

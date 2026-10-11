@@ -5,6 +5,7 @@
    - Retry FETCH_FAILED PRD §1: 3 percobaan ulang dengan jeda 30/60/120 detik (nilai operasional, bukan parameter riset).
    - WebSocket ticker 6 pair dengan watchdog 20 detik dan reconnect bertahap.
    - exchangeInfo publik (PRD v1.0.11 R32): aturan tick/step/min notional untuk rencana siap salin.
+   - ticker/24hr + kline 1d publik (PRD v1.0.12 R34): ranking universe 100 pair pada close harian 00:00 UTC.
    Hanya endpoint publik baca-saja. Tidak ada API key dan tidak ada endpoint order. */
 (function(root,factory){
   if(typeof module==='object'&&module.exports)module.exports=factory();
@@ -15,7 +16,7 @@
   const H4=4*3600*1000;
   const RETRY_DELAYS=Object.freeze([30000,60000,120000]);
   // Hanya path baca-saja ini yang boleh diminta; apa pun di luar daftar ditolak sebelum menyentuh jaringan.
-  const ALLOWED=[/^\/fapi\/v1\/time$/,/^\/fapi\/v1\/klines\?/,/^\/fapi\/v1\/openInterest\?/,/^\/fapi\/v1\/exchangeInfo$/];
+  const ALLOWED=[/^\/fapi\/v1\/time$/,/^\/fapi\/v1\/klines\?/,/^\/fapi\/v1\/openInterest\?/,/^\/fapi\/v1\/exchangeInfo$/,/^\/fapi\/v1\/ticker\/24hr$/];
 
   function createTransport({fetchImpl=(...a)=>fetch(...a),now=()=>Date.now(),sleep=ms=>new Promise(r=>setTimeout(r,ms)),gapMs=200,timeoutMs=20000,base=REST}={}){
     let tail=Promise.resolve(),cooldownUntil=0,clockOffset=0;
@@ -63,7 +64,10 @@
     const openInterest=symbol=>request('/fapi/v1/openInterest?symbol='+encodeURIComponent(symbol)).then(x=>Number(x&&x.openInterest));
     // Aturan pair (tickSize/stepSize/minQty/min notional/status) untuk rencana siap salin R32 — publik, tanpa API key.
     const exchangeInfo=()=>request('/fapi/v1/exchangeInfo');
-    return {request,syncClock,serverNow,klines,openInterest,exchangeInfo,clearCache:()=>cache.clear(),_state:()=>({cooldownUntil,clockOffset,cacheSize:cache.size})};
+    // Universe R34: volume 24 jam semua pair (kumpulan kandidat) dan candle harian untuk ranking pada close 00:00 UTC.
+    const ticker24hr=()=>request('/fapi/v1/ticker/24hr');
+    const dailyKlines=(symbol,limit=3)=>request('/fapi/v1/klines?symbol='+encodeURIComponent(symbol)+'&interval=1d&limit='+limit);
+    return {request,syncClock,serverNow,klines,openInterest,exchangeInfo,ticker24hr,dailyKlines,clearCache:()=>cache.clear(),_state:()=>({cooldownUntil,clockOffset,cacheSize:cache.size})};
   }
 
   /* FETCH_FAILED (PRD §1): satu percobaan awal + 3 percobaan ulang (jeda 30/60/120 detik). onAttemptFailed dipanggil

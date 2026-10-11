@@ -1,9 +1,11 @@
 'use strict';
-/* Unduh kline 4H ASLI terbaru (±260 hari sampai kemarin) untuk 6 pair dari arsip resmi data.binance.vision
+/* Unduh kline 4H ASLI terbaru (±260 hari sampai kemarin) untuk 20 pair dari arsip resmi data.binance.vision
    (bulanan + harian, checksum resmi). Dipakai untuk menguji aplikasi ujung-ke-ujung dengan data pasar asli
    di server yang diblokir API Binance (HTTP 451). Output: data/recent/<PAIR>.csv. */
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),{execFileSync}=require('node:child_process');
-const PAIRS=['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','DOGEUSDT','XRPUSDT'];
+// 6 pair inti + 14 pair likuid lain (R34: menguji universe multi-pair dengan data asli; ranking dari volume harian asli).
+const PAIRS=['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','DOGEUSDT','XRPUSDT','ADAUSDT','AVAXUSDT','LINKUSDT','LTCUSDT','DOTUSDT','TRXUSDT','BCHUSDT',
+  'NEARUSDT','APTUSDT','ARBUSDT','OPUSDT','SUIUSDT','1000PEPEUSDT','WIFUSDT'];
 const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'data','recent'),TMP=path.join(OUT,'_zip');
 const BASE='https://data.binance.vision/data/futures/um';
 fs.mkdirSync(TMP,{recursive:true});

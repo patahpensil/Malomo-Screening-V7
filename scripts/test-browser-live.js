@@ -12,8 +12,13 @@ const server=http.createServer((req,res)=>{let f=path.join(SITE,decodeURICompone
   if(!f.startsWith(SITE)||!fs.existsSync(f)||!fs.statSync(f).isFile()){res.writeHead(404);res.end();return;}res.setHeader('Content-Type',TYPES[path.extname(f)]||'application/octet-stream');res.end(fs.readFileSync(f));});
 const ARCH=process.env.ARCHIVE_DIR?path.resolve(process.env.ARCHIVE_DIR):null;
 let ROWS=null,NOW=null;
-if(ARCH){ROWS={};for(const s of ['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','DOGEUSDT','XRPUSDT'])ROWS[s]=fs.readFileSync(path.join(ARCH,s+'.csv'),'utf8').trim().split('\n').map(l=>l.split(',').map((v,i)=>i===0||i===6||i===8?Number(v):v));
-  NOW=ROWS.BTCUSDT[ROWS.BTCUSDT.length-1][0]+10*60000;}
+const UV=require('../app/universe');
+let UNIVERSE=null,DAYSTART=null;
+const dailyVol=(rows,day)=>{let v=0,n=0;for(const k of rows)if(k[0]>=day-UV.DAY&&k[0]<day){v+=Number(k[7]);n++;}return n===6?v:null;};   // 6 candle 4H = 1 hari penuh
+if(ARCH){ROWS={};for(const f of fs.readdirSync(ARCH).filter(f=>/^[A-Z0-9]+USDT\.csv$/.test(f))){const s=f.replace('.csv','');ROWS[s]=fs.readFileSync(path.join(ARCH,f),'utf8').trim().split('\n').map(l=>l.split(',').map((v,i)=>i===0||i===6||i===8?Number(v):v));}
+  NOW=ROWS.BTCUSDT[ROWS.BTCUSDT.length-1][0]+10*60000;DAYSTART=UV.dayStartOf(NOW);
+  const vols={};for(const [s,r] of Object.entries(ROWS)){const v=dailyVol(r.filter(k=>k[0]<=NOW),DAYSTART);if(v!==null)vols[s]=v;}
+  UNIVERSE=UV.rank(vols);}
 async function prepare(ctx){
   if(!ARCH)return;
   await ctx.addInitScript(([now,prices])=>{const realNow=Date.now.bind(Date),off=now-realNow();Date.now=()=>realNow()+off;
@@ -26,6 +31,12 @@ async function prepare(ctx){
   await ctx.route('https://fapi.binance.com/**',route=>{const u=new URL(route.request().url());
     if(u.pathname==='/fapi/v1/time')return route.fulfill({json:{serverTime:NOW}});
     if(u.pathname==='/fapi/v1/openInterest')return route.fulfill({json:{openInterest:'1000'}});
+    if(u.pathname==='/fapi/v1/exchangeInfo')return route.fulfill({json:{symbols:Object.keys(ROWS).map(s=>({symbol:s,contractType:'PERPETUAL',quoteAsset:'USDT',baseAsset:s.replace(/USDT$/,''),underlyingType:'COIN',status:'TRADING',
+      filters:[{filterType:'PRICE_FILTER',tickSize:'0.0000001'},{filterType:'LOT_SIZE',stepSize:'1',minQty:'1',maxQty:'100000000'},{filterType:'MIN_NOTIONAL',notional:'5'}]}))}});
+    // volume 24 jam & candle harian diturunkan dari kline 4H ASLI arsip (jumlah 6 candle 4H per hari UTC)
+    if(u.pathname==='/fapi/v1/ticker/24hr')return route.fulfill({json:Object.entries(ROWS).map(([s,r])=>({symbol:s,quoteVolume:String(r.filter(k=>k[0]<=NOW).slice(-6).reduce((a,k)=>a+Number(k[7]),0))}))});
+    if(u.pathname==='/fapi/v1/klines'&&u.searchParams.get('interval')==='1d'){const r=ROWS[u.searchParams.get('symbol')].filter(k=>k[0]<=NOW),out=[];
+      for(const d of [DAYSTART-2*UV.DAY,DAYSTART-UV.DAY]){const v=dailyVol(r,d+UV.DAY);if(v!==null)out.push([d,'1','1','1','1','1',d+UV.DAY-1,String(v)]);}return route.fulfill({json:out});}
     if(u.pathname==='/fapi/v1/klines')return route.fulfill({json:ROWS[u.searchParams.get('symbol')].filter(k=>k[0]<=NOW).slice(-Number(u.searchParams.get('limit')))});
     return route.fulfill({status:404,body:''});});
 }
@@ -50,7 +61,7 @@ async function prepare(ctx){
       await run(`[${viewport.width}px] Lima layar tampil tanpa error`,async()=>{
         for(const sc of ['event','portofolio','pasar','audit','siklus']){await page.locator(sel+` [data-screen="${sc}"]`).click();await page.waitForTimeout(700);
           const t=await page.locator('main').innerText();assert(t.length>50&&!/NaN|undefined|\[object Object\]/.test(t),sc);}
-        await page.locator(sel+' [data-screen="pasar"]').click();await page.waitForSelector('.chart svg');assert.equal(await page.locator('.chart svg').count(),6);
+        await page.locator(sel+' [data-screen="pasar"]').click();await page.waitForSelector('.chart svg');assert(await page.locator('.chart svg').count()>=6);
         await page.locator(sel+' [data-screen="audit"]').click();await page.waitForSelector('[data-action="download-audit"]');
         const a=await page.locator('main').innerText();assert.equal((a.match(/cocok manifest/g)||[]).length,2,'hash normalisasi');
       });
@@ -58,9 +69,12 @@ async function prepare(ctx){
         if(!ARCH)return 'lewati (mode jaringan)';
         const got=await page.evaluate(()=>MalomoApp.app.state.history.map(r=>r.symbol+'|'+r.side+'|'+r.signal_family+'|'+r.decision_available_utc+'|'+r.status+'|'+r.scores.m6_confluense_500));
         const Cy=require('../app/cycle'),M2=require('../engine/m2');const fr=M2.frozenFrom(JSON.parse(fs.readFileSync(path.join(__dirname,'../evidence/frozen_cdf_normalization.json'),'utf8')),JSON.parse(fs.readFileSync(path.join(__dirname,'../evidence/frozen_v2_normalizations.json'),'utf8')));
-        const st=Cy.buildState({rawBySymbol:Object.fromEntries(Object.entries(ROWS).map(([s,r])=>[s,r.filter(k=>k[0]<=NOW).slice(-1500).map(Cy.toCandle)])),now:NOW,frozen:fr});
+        const syms=[...new Set([...UNIVERSE.map(x=>x.symbol),...require('../engine/core').PAIRS])];
+        const st=Cy.buildState({rawBySymbol:Object.fromEntries(syms.map(s=>[s,ROWS[s].filter(k=>k[0]<=NOW).slice(-1500).map(Cy.toCandle)])),now:NOW,frozen:fr,
+          symbols:syms,gate:{fromMs:DAYSTART,allowed:new Set(UNIVERSE.map(x=>x.symbol))}});
+        const uv=await page.evaluate(()=>MalomoApp.app.universe);assert.equal(uv.source,'live');assert.deepEqual(uv.list.map(x=>x.symbol),UNIVERSE.map(x=>x.symbol),'universe browser ≠ ranking volume harian asli');
         assert.deepEqual(got,st.history.map(r=>r.symbol+'|'+r.side+'|'+r.signal_family+'|'+r.decision_available_utc+'|'+r.status+'|'+r.scores.m6_confluense_500));
-        return got.length+' record identik';
+        return got.length+' record identik · universe '+UNIVERSE.length+' pair dari volume harian asli (#1 '+UNIVERSE[0].symbol+')';
       });
       await run(`[${viewport.width}px] WebSocket ticker Binance tersambung`,async()=>{
         await page.waitForFunction(()=>MalomoApp.ticker&&MalomoApp.ticker.isLive(),null,{timeout:30000});

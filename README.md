@@ -1,6 +1,6 @@
 # Malomo Screening V7
 
-Spesifikasi riset **enam metodologi trading berbobot (M1–M5) dan M6 CONFLUENSE** untuk enam pair Binance USDⓈ-M Futures (`BTCUSDT`, `ETHUSDT`, `SOLUSDT`, `BNBUSDT`, `DOGEUSDT`, `XRPUSDT`), candle 4H, waktu UTC.
+Spesifikasi riset **enam metodologi trading berbobot (M1–M5) dan M6 CONFLUENSE** untuk enam pair inti Binance USDⓈ-M Futures (`BTCUSDT`, `ETHUSDT`, `SOLUSDT`, `BNBUSDT`, `DOGEUSDT`, `XRPUSDT`; basket M3), candle 4H, waktu UTC. Sejak v1.0.12 aplikasi live menghitung 100 pair volume harian tertinggi (PRD §17) dengan rumus yang sama.
 
 > **Riset saja.** Repo ini berisi spesifikasi, bukti, engine, dan alat verifikasi. **Tidak ada kode order** dan tidak ada API key; koneksi ke Binance (tahap 2) hanya membaca data pasar publik. Skor M6 adalah **indeks desain (0–500), bukan probabilitas menang**, dan belum ada backtest komposit M1–M5 yang membuktikan edge ekonomi.
 
@@ -10,7 +10,7 @@ Spesifikasi riset **enam metodologi trading berbobot (M1–M5) dan M6 CONFLUENSE
 
 | Berkas | Fungsi |
 |---|---|
-| `PRD_FINAL_ENAM_METODOLOGI_M1_M6_CONFLUENSE_2026-10-10.md` | **Spesifikasi normatif tunggal** (v1.0.11-FINAL-DESIGN): rumus M1–M6, status tiga lapis, kontrak JSON, acceptance test, riwayat revisi |
+| `PRD_FINAL_ENAM_METODOLOGI_M1_M6_CONFLUENSE_2026-10-10.md` | **Spesifikasi normatif tunggal** (v1.0.12-FINAL-DESIGN): rumus M1–M6, status tiga lapis, kontrak JSON, acceptance test, riwayat revisi |
 | `LAPORAN_VALIDASI_PRD_FINAL_M1_M6_2026-10-10.md` | Batas bukti dan ringkasan verifikasi tiap revisi |
 | `verify_final_prd.py` | Verifier offline (Python 3 standar, tanpa dependensi) |
 | `VALIDASI_PRD_FINAL_M1_M6.json` | Hasil verifier terakhir |
@@ -84,10 +84,11 @@ Aplikasi web statis (PWA) di atas engine yang sama, tanpa server, tanpa API key,
 | `app/cycle.js` | `btcRegime` (PRD §16 R33): label rezim BTC informatif, bukan gate. Satu siklus 4H: kline → engine `decide` kronologis atas 1.500 candle terakhir (portofolio simulasi §6: slot 24 jam, ekuitas 100 tanpa kompaun), dua fase `CLOSE_CANDIDATE` → `ENTRY_REVIEW`, penandaan `FETCH_FAILED`/`CONFIRMED_GAP`, outcome riset stop/target/horizon 24 jam |
 | `app/ui.js`, `app/labels.js` | Enam layar Referensi UI/UX (Siklus 4H, Inspektor, Papan Event, Portofolio Simulasi dengan kartu Decision pola B, Konteks Pasar, Audit & Data) dan kamus label §6 |
 | `app/exec.js` | PRD §16 R32 — rencana siap salin: harga dibulatkan ke `tickSize` ke arah aman (aritmetika bilangan bulat tick), qty dari modal & risiko 0,5–1% dibulatkan ke `stepSize`, leverage maksimum aman otomatis, cek minimum notional/minQty/margin, parser `/fapi/v1/exchangeInfo` publik. Tidak mengubah record audit. |
+| `app/universe.js`, `app/worker.js` | PRD §17 R34 — universe 100 pair USDT perpetual volume harian tertinggi (ranking tiap close harian 00:00 UTC = 08:00 WITA, hard gate; stablecoin/indeks dikeluarkan); engine dijalankan di Web Worker agar 100 pair tidak membekukan layar. Basket M3 tetap 6 pair inti; rumus skor tidak berubah. |
 | `app/main.js` | Jadwal siklus 5 detik setelah close 4H (jam server), cek ulang 15 detik bila open berikutnya belum muncul; aturan pair `exchangeInfo` diperbarui tiap 24 jam |
 
 ```bash
-npm test               # engine 35 + paritas M2 3 + aplikasi 26 + rencana siap salin/rezim BTC 15 + verifier PRD 32
+npm test               # engine 35 + paritas M2 3 + aplikasi 26 + rencana siap salin/rezim BTC 16 + universe 11 + verifier PRD 32
 npm run test:browser   # susun _site/ lalu uji bug Chromium (desktop 1440 px + mobile 390 px, skenario terkendali)
 node scripts/fetch-recent-archive.js && ARCHIVE_DIR=data/recent node scripts/test-browser-live.js   # data Binance asli
 node scripts/live-check.js   # API Binance langsung (REST + WebSocket); butuh jaringan yang tidak diblokir Binance
@@ -135,7 +136,7 @@ Batas adopsi dari [`patahpensil/ict-screening`](https://github.com/patahpensil/i
 |---|---|
 | Antrean request REST (jeda 200 ms, timeout 20 detik, cooldown 429/418 + `Retry-After`) | Lapisan transport. Bila tetap gagal, siklus ditandai `FETCH_FAILED` dan dicoba ulang 30/60/120 detik (PRD §1) |
 | Sinkron jam server Binance (`/fapi/v1/time`) | Penentuan candle 4H sudah close (aturan closed-bar PRD) |
-| Cache candle sampai candle berikutnya close | Candle 4H 6 pair diunduh sekali per siklus |
+| Cache candle sampai candle berikutnya close | Candle 4H universe diunduh penuh sekali, lalu 10 candle terakhir per siklus |
 | WebSocket ticker + watchdog 20 detik + reconnect bertahap | Harga live di kartu Decision |
 | Stream per posisi: aggTrade (CVD), depth20 (orderbook), poll Open Interest | Sel data live di kartu Decision — **hanya tampilan, tidak pernah masuk skor** (PRD §4.5) |
 
@@ -153,7 +154,7 @@ Isi kartu berasal dari posisi simulasi `ENTRY_CONSIDER` (PRD §6), bukan dari tr
 
 | Di ICT Screening | Di Malomo V7 (PRD) |
 |---|---|
-| Universe Top 100 dari 250 pair, scan tiap 60 detik | 6 pair tetap, siklus per close 4H |
+| Universe Top 100 dari 250 pair, scan tiap 60 detik | Top 100 volume harian, ditetapkan tiap close harian 08:00 WITA (keputusan pengguna, PRD §17); siklus per close 4H |
 | Engine turtle/intraday, tombol LONG/SKIP/SHORT | M1–M6 Confluense, status tiga lapis (`event_status` / `score_status` / `status`) |
 | ARMED → RUNNING saat harga menyentuh entry | Entry hipotetis di open candle berikutnya (fase `ENTRY_REVIEW`) |
 | Keluar di SL atau exit 20 hari, jurnal otomatis win/loss | Slot 24 jam tetap; stop/target hanya dicatat sebagai outcome riset |
@@ -171,6 +172,7 @@ Isi kartu berasal dari posisi simulasi `ENTRY_CONSIDER` (PRD §6), bukan dari tr
 | A | Uji arsitektur: backtest komposit 30 pair likuid 2024–2026 + usulan perbaikan (PRD §14) | Selesai — belum ada edge signifikan |
 | A2 | Riset generator baru + rezim BTC, 28 konfigurasi (PRD §15) | Selesai — tidak ada yang lulus |
 | v1.0.11 | Lapisan penggunaan nyata: rencana siap salin (R32) + label rezim BTC (R33), PRD §16 | Selesai (uji browser 23/23) |
+| v1.0.12 | Universe 100 pair volume harian (R34, hard gate), PRD §17 | Selesai (uji browser 24/24; 75 pair asli identik) |
 
 ## Catatan bukti
 

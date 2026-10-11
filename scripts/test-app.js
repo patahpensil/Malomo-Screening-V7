@@ -200,12 +200,14 @@ test('Transport: antrean 200 ms, cooldown 429 memakai Retry-After, error HTTP di
   for(const p of ['/fapi/v1/order?symbol=BTCUSDT','/fapi/v2/account','/fapi/v1/listenKey','/fapi/v1/klines'])await assert.rejects(tr.request(p),/tidak diizinkan/);
   assert.equal(calls.length,3);
 });
-test('Transport: exchangeInfo (R32) publik diizinkan persis; varian path lain ditolak sebelum jaringan',async()=>{
+test('Transport: exchangeInfo (R32), ticker/24hr & kline 1d (R34) publik diizinkan persis; varian path lain ditolak sebelum jaringan',async()=>{
   const ck=fakeClock(),calls=[];
   const tr=Tr.createTransport({now:ck.now,sleep:ck.sleep,fetchImpl:async u=>{calls.push(u);return res(200,{symbols:[]});}});
   assert.deepEqual(await tr.exchangeInfo(),{symbols:[]});assert.equal(calls[0],Tr.REST+'/fapi/v1/exchangeInfo');
-  for(const p of ['/fapi/v1/exchangeInfo?symbol=BTCUSDT','/fapi/v2/exchangeInfo','/fapi/v1/leverageBracket'])await assert.rejects(tr.request(p),/tidak diizinkan/);
+  for(const p of ['/fapi/v1/exchangeInfo?symbol=BTCUSDT','/fapi/v2/exchangeInfo','/fapi/v1/leverageBracket','/fapi/v1/ticker/24hr?symbol=BTCUSDT','/fapi/v2/ticker/price'])await assert.rejects(tr.request(p),/tidak diizinkan/);
   assert.equal(calls.length,1);
+  await tr.ticker24hr();await tr.dailyKlines('SUIUSDT');
+  assert.equal(calls[1],Tr.REST+'/fapi/v1/ticker/24hr');assert.equal(calls[2],Tr.REST+'/fapi/v1/klines?symbol=SUIUSDT&interval=1d&limit=3');
 });
 test('Transport: sinkron jam server; cache kline sampai candle berjalan close; tanpa candle berjalan → tidak di-cache',async()=>{
   const ck=fakeClock();let n=0,serverOffset=7000;const t0=Math.floor((ck.now()+serverOffset)/H4)*H4;
@@ -256,7 +258,7 @@ test('Live posisi: CVD taker (m=true → jual), orderbook imbalance, jendela CVD
 });
 
 // ---------- pemindaian statis ----------
-const SRC=['app/index.html','app/main.js','app/ui.js','app/cycle.js','app/transport.js','app/live.js','app/labels.js','app/exec.js','app/sw.js',...fs.readdirSync(path.join(ROOT,'engine')).map(f=>'engine/'+f)];
+const SRC=['app/index.html','app/main.js','app/ui.js','app/cycle.js','app/transport.js','app/live.js','app/labels.js','app/exec.js','app/universe.js','app/worker.js','app/sw.js',...fs.readdirSync(path.join(ROOT,'engine')).map(f=>'engine/'+f)];
 const read=f=>fs.readFileSync(path.join(ROOT,f),'utf8');
 test('Statis: tanpa endpoint order/akun, tanpa API key/signature, hanya REST publik + WebSocket pasar',()=>{
   for(const f of SRC){const s=read(f);
