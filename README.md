@@ -15,6 +15,7 @@ Spesifikasi riset **enam metodologi trading berbobot (M1–M5) dan M6 CONFLUENSE
 | `MANIFEST_SHA256.json` | Hash SHA-256 semua berkas paket |
 | `evidence/` | Data bukti 2024: skor kanonis 410 event Breakout (in-sample), skor kausal ECDF prior-only 772 event, array kalibrasi beku, kontrak generator v2 |
 | `docs/uiux/REFERENSI_UIUX_SCREENING_MALOMO_V1.md` | Referensi UI/UX untuk menampilkan output PRD |
+| `engine/`, `scripts/` | Engine JavaScript dan tes (lihat bagian Engine) |
 
 ## Ringkasan model
 
@@ -36,6 +37,33 @@ python3 verify_final_prd.py
 ```
 
 Hasil yang diharapkan: **32 PASS, 0 FAIL**. Cakupannya kontrak, aritmetika, konsistensi bahasa–kode, dan bukti 2024 (termasuk reproduksi ulang 400 skor kausal train dan 281 skor eval dari fitur mentah). Tes T04/T05/T09/T14/T15 berlabel `STATIC_CONTRACT_CHECK` dan **bukan** validasi engine. Lulus verifier **tidak** berarti strategi menguntungkan.
+
+## Engine (tahap 1)
+
+Fungsi murni JavaScript (UMD: jalan di Node dan browser), kausal, tanpa DOM, jaringan, atau order. Pola modul mengikuti `ict-screening`.
+
+| Modul | Isi (PRD v1.0.7) |
+|---|---|
+| `engine/core.js` | Validasi candle & gap (§1), `ewm(alpha=1/14, adjust=False)` identik pandas, ATR/DI/ADX, pivot 5-bar ketat, ECDF tie kanan, kuantil linear, Pearson (§2) |
+| `engine/m1.js` | Struktur BULLISH/BEARISH/TRANSITION, TE14, ADX, NATR typicality (§3) |
+| `engine/generators.js` | Breakout–Retest, Pullback Continuation (setup i+2, jendela i+3..i+26), Reversal–Retest (`M1_origin`) (§4.2–§4.4) |
+| `engine/m2.js` | Fitur E4/ClosePos/RVOL/Taker, kalibrasi beku & prior-only (≥30, ketat <), kualitas 80, integritas 20 berbasis log (§2, §4.5–§4.6) |
+| `engine/m3m4.js` | M3 korelasi 60 + ekor 40, rencana & M4 dengan reason code, portofolio simulasi slot 24 jam, snapshot M5 (§5–§7) |
+| `engine/pipeline.js` | Kanonisasi, gate arah, CLOSE_CANDIDATE → ENTRY_REVIEW, ranking tie-break, keluaran kontrak JSON §10, replay arsip (§8–§10) |
+
+```bash
+npm test                 # 32 tes engine + 3 tes paritas skor M2 terhadap evidence
+npm run test:prd         # verifier PRD (Python)
+npm run parity:ohlcv     # paritas penuh dari candle 2024; SKIP bila data/ohlcv-2024/<PAIR>.csv belum ada
+```
+
+Yang sudah terbukti: `ewm`/ATR/ADX identik pandas; M3 identik numpy; skor kualitas M2 engine mereproduksi 681 skor kausal + 91 `null` dari CSV 772 event dan 410/410 skor in-sample Breakout. **Belum terbukti:** paritas generator & M1 dari candle mentah 2024 — butuh arsip kline Binance 4H 2024 untuk 6 pair di `data/ohlcv-2024/` (format kline Binance), lalu jalankan `npm run parity:ohlcv`.
+
+### Catatan terbuka engine (perlu keputusan PRD)
+
+1. **Zona Pullback dilompati dalam satu candle.** Sesuai teks PRD, zona dinilai dari kedalaman `d` pada close candle (memakai `minLow`). Jika satu candle membawa `d` dari < 0.25 langsung ke 0.75–0.85, zona dianggap tidak tersentuh dan setup akhirnya `PREZONE_CENSORED`. Perlu konfirmasi apakah kode `pullback_v2` memakai rentang intrabar.
+2. **Reason `PLAN_RISK_INVALID`.** Dipakai bila stop ≤ 0 atau rencana tidak finite (M4 `D=0`). Kode ini belum ada di daftar reason PRD.
+3. **Candle pertama deret.** TR dan ±DM pada candle pertama dianggap tak terdefinisi (previous close belum ada). Arsip historis mungkin memakai 0 atau `high−low`; pengaruhnya meluruh < 0.01% setelah warmup.
 
 ## Catatan bukti
 
