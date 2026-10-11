@@ -56,13 +56,16 @@
       // M1_origin: struktur dari pivot yang confirm <= t−1 (sebelum candle break diproses), PRD v1.0.2 §4.4.
       const st=M1.structure(piv,t-1);
       if(st.label!=='BULLISH'&&st.label!=='BEARISH')continue;
-      let side,prot;
-      if(st.label==='BULLISH'){side='SHORT';prot=last(st.ls.filter(l=>l.i<st.h2.i));}   // HL terakhir sebelum HH terbaru
-      else{side='LONG';prot=last(st.hs.filter(h=>h.i<st.l2.i));}                       // LH terakhir sebelum LL terbaru
-      if(!prot||used[side].has(prot.i))continue;
-      // "HL"/"LH" (§4.4): protected pivot wajib benar-benar higher low / lower high terhadap pivot sejenis sebelumnya.
-      const same=side==='SHORT'?st.ls:st.hs,k=same.indexOf(prot),prev=k>0?same[k-1]:null;
-      if(!prev||(side==='SHORT'?!(prot.price>prev.price):!(prot.price<prev.price)))continue;
+      /* §4.4 (generator arsip reversal_v2, dikonfirmasi penyusun PRD 11 Okt 2026): dua high (h2→h1) dan dua low (l2→l1)
+         terakhir wajib memenuhi syarat harga DAN kronologi indeks ketat:
+         SHORT (asal bullish): H[h1]>H[h2], L[l1]>L[l2], l2<l1<h1 → protected = l1 (HL terbaru);
+         LONG  (asal bearish): H[h1]<H[h2], L[l1]<L[l2], h2<h1<l1 → protected = h1 (LH terbaru).
+         Satu event aktif per sisi; protected pivot tidak boleh dipakai ulang. */
+      const {h1:h2_,h2:h1_,l1:l2_,l2:l1_}=st;   // M1.structure: h1 = terdahulu, h2 = terbaru
+      let side=null,prot=null;
+      if(st.label==='BULLISH'&&h1_.price>h2_.price&&l1_.price>l2_.price&&l2_.i<l1_.i&&l1_.i<h1_.i){side='SHORT';prot=l1_;}
+      else if(st.label==='BEARISH'&&h1_.price<h2_.price&&l1_.price<l2_.price&&h2_.i<h1_.i&&h1_.i<l1_.i){side='LONG';prot=h1_;}
+      if(!side||used[side].has(prot.i)||active.some(e=>e.side===side))continue;
       const s=side==='LONG'?1:-1,b=RULES.b*A,L=prot.price;
       if(s*(c[t-1].close-L)<=b&&s*(c[t].close-L)>b){
         used[side].add(prot.i);

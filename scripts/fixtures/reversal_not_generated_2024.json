@@ -1,5 +1,5 @@
 {
-  "note": "Event Reversal CONFIRMED yang dibangkitkan engine (aturan PRD §4.4) tetapi tidak ada di CSV bukti 772. Seluruh 64 event bukti Reversal direproduksi; aturan tambahan generator arsip yang menyaring 11 event ini belum diketahui — pertanyaan terbuka ke penyusun PRD.",
+  "note": "Tes regresi PRD v1.0.8 (jawaban audit paritas 11 Okt 2026): 11 break Reversal ini gagal syarat kronologi pivot reversal_v2 (l2<l1<h1 / h2<h1<l1) dan WAJIB tidak dibangkitkan. Kunci = keluarga|pair|side|waktu konfirmasi (UTC).",
   "events": [
     "REVERSAL_RETEST|BTCUSDT|LONG|2024-10-25T00:00:00Z",
     "REVERSAL_RETEST|ETHUSDT|LONG|2024-08-09T16:00:00Z",

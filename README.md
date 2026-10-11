@@ -63,16 +63,15 @@ npm run parity:ohlcv     # paritas penuh dari candle 2024; SKIP bila data/ohlcv-
 
 Yang sudah terbukti:
 - `ewm`/ATR/ADX identik pandas; M3 identik numpy.
-- **Paritas penuh dari candle asli Binance 2024** (arsip resmi data.binance.vision, checksum resmi; `npm run parity:ohlcv`): Breakout 410/410 dan Pullback 298/298 event identik; Reversal 64/64 event bukti direproduksi (+11 ekstra, lihat catatan terbuka); M1 410/410; generation30 410/410; skor kualitas 80 kausal **772/772**.
-- Paritas ini menemukan tiga perbedaan engine terhadap kode yang diuji, kini sudah diperbaiki sesuai teks PRD: (1) Breakout §4.2 "sampai event selesai tidak boleh mengganti level" → satu event aktif per sisi, dan pivot dilepas setelah event selesai; (2) Pullback §4.3 "jangan mengganti impuls di tengah setup" → satu setup aktif per sisi; (3) Reversal §4.4 protected pivot wajib HL/LH sejati. Selain itu E4 Breakout memakai penyebut + 1e−12 seperti array beku (mencegah ECDF bergeser satu langkah pada kasus searah murni).
+- **Paritas penuh dari candle asli Binance 2024** (arsip resmi data.binance.vision, checksum resmi; `npm run parity:ohlcv`): Breakout 410/410, Pullback 298/298, dan Reversal 64/64 event identik tanpa ekstra; M1 410/410; generation30 410/410; skor kualitas 80 kausal **772/772**.
+- Paritas ini menemukan tiga perbedaan engine terhadap kode yang diuji, kini sudah diperbaiki sesuai teks PRD: (1) Breakout §4.2 "sampai event selesai tidak boleh mengganti level" → satu event aktif per sisi, dan pivot dilepas setelah event selesai; (2) Pullback §4.3 "jangan mengganti impuls di tengah setup" → satu setup aktif per sisi; (3) Reversal §4.4 syarat harga **dan** kronologi pivot `l2<l1<h1` (SHORT) / `h2<h1<l1` (LONG), satu event aktif per sisi — dikonfirmasi penyusun PRD (jawaban audit paritas 11 Okt 2026, usulan v1.0.8). Selain itu E4 Breakout memakai penyebut + 1e−12 seperti array beku (mencegah ECDF bergeser satu langkah pada kasus searah murni).
 
 ### Catatan terbuka engine (perlu keputusan PRD)
 
 1. **Zona Pullback dilompati dalam satu candle.** Sesuai teks PRD, zona dinilai dari kedalaman `d` pada close candle (memakai `minLow`). Jika satu candle membawa `d` dari < 0.25 langsung ke 0.75–0.85, zona dianggap tidak tersentuh dan setup akhirnya `PREZONE_CENSORED`. Perlu konfirmasi apakah kode `pullback_v2` memakai rentang intrabar.
 2. **Reason `PLAN_RISK_INVALID`.** Dipakai bila stop ≤ 0 atau rencana tidak finite (M4 `D=0`). Kode ini belum ada di daftar reason PRD.
-3. **Reversal: 11 event ekstra.** Engine membangkitkan 75 event Reversal CONFIRMED pada 2024 (64 bukti + 11). Aturan tambahan generator arsip yang menyaring 11 event ini belum diketahui; daftarnya di `scripts/fixtures/known_reversal_extras_2024.json` (paritas FAIL bila muncul deviasi lain). Perlu ditanyakan ke penyusun PRD.
-4. **Kode reason rinci engine.** Selain enam kode PRD, engine mengisi `reasons[]` dengan kode rinci agar tidak kosong (mis. `DIRECTION_GATE`, `M3_HISTORY_INCOMPLETE:<pair>`, `CALIBRATION_INCOMPLETE`). Semua diberi label di UI; perlu diresmikan atau dipetakan di PRD.
-5. **Candle pertama deret.** TR dan ±DM pada candle pertama dianggap tak terdefinisi (previous close belum ada). Arsip historis mungkin memakai 0 atau `high−low`; pengaruhnya meluruh < 0.01% setelah warmup.
+3. **Kode reason rinci engine.** Selain enam kode PRD, engine mengisi `reasons[]` dengan kode rinci agar tidak kosong (mis. `DIRECTION_GATE`, `M3_HISTORY_INCOMPLETE:<pair>`, `CALIBRATION_INCOMPLETE`). Semua diberi label di UI; perlu diresmikan atau dipetakan di PRD.
+4. **Candle pertama deret.** TR dan ±DM pada candle pertama dianggap tak terdefinisi (previous close belum ada). Arsip historis mungkin memakai 0 atau `high−low`; pengaruhnya meluruh < 0.01% setelah warmup.
 
 ## Aplikasi (tahap 2–3)
 
@@ -142,7 +141,7 @@ Isi kartu berasal dari posisi simulasi `ENTRY_CONSIDER` (PRD §6), bukan dari tr
 | 1 | Engine M1–M6 + tes + paritas skor M2 | Selesai |
 | 2 | Data live Binance (pola A) dan kartu Decision (pola B) | Selesai |
 | 3 | Enam layar referensi UI/UX, PWA, GitHub Pages bergerbang tes | Selesai (uji browser 20/20) |
-| — | Paritas OHLCV 2024 dari candle asli | Selesai (Reversal: 11 ekstra, catatan terbuka) |
+| — | Paritas OHLCV 2024 dari candle asli | Selesai (772/772 event + skor) |
 
 ## Catatan bukti
 
