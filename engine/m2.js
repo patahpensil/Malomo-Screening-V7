@@ -10,9 +10,13 @@
   const FAMILIES=['BREAKOUT_RETEST','PULLBACK_CONTINUATION','REVERSAL_RETEST'];
 
   // §4.5 fitur mentah pada candle konfirmasi t untuk arah s (+1/−1). Hanya candle tutup.
-  function features(c,t,s){
+  function features(c,t,s,family){
     const reasons=[],f={e4:NaN,closepos:NaN,rvol:NaN,taker:NaN};
-    if(t>=4){let num=0,den=0;for(let j=t-3;j<=t;j++){const r=Math.log(c[j].close/c[j-1].close);num+=r;den+=Math.abs(r);}f.e4=den>0?s*num/den:NaN;}
+    // Arsip Breakout 2024 (canonical, array beku train-2024-03-21…breakout-retest-v1) menghitung penyebut + 1e−12;
+    // arsip Pullback/Reversal v2 tanpa epsilon. Diikuti persis agar ECDF beku tidak bergeser satu langkah pada
+    // kasus searah murni (E4 = 1 vs 0.99999999994 di array). Penyebut 0 tetap INCOMPLETE (§4.5).
+    if(t>=4){let num=0,den=0;for(let j=t-3;j<=t;j++){const r=Math.log(c[j].close/c[j-1].close);num+=r;den+=Math.abs(r);}
+      f.e4=den>0?s*num/(den+(family==='BREAKOUT_RETEST'?1e-12:0)):NaN;}
     if(!fin(f.e4))reasons.push('E4_INCOMPLETE');
     const x=c[t];f.closepos=x.high>x.low?s*(2*(x.close-x.low)/(x.high-x.low)-1):NaN;
     if(!fin(f.closepos))reasons.push('CLOSEPOS_INCOMPLETE');

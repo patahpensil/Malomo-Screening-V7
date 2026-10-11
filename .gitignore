@@ -3,3 +3,5 @@ data/ohlcv-2024/*.zip
 .DS_Store
 _site/
 test-results.json
+data/ohlcv-2024/
+data/recent/

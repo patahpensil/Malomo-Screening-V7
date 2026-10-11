@@ -15,12 +15,37 @@ async function step(name,fn){try{const r=await fn();pass++;console.log('PASS '+n
   catch(e){fails.push(name);console.log('FAIL '+name+' — '+e.message);summary.push('| ❌ | '+name+' | '+String(e.message).replace(/\|/g,'/')+' |');}}
 const wait=(cond,ms,label)=>new Promise((res,rej)=>{const t0=Date.now();const iv=setInterval(()=>{if(cond()){clearInterval(iv);res();}else if(Date.now()-t0>ms){clearInterval(iv);rej(new Error('timeout '+ms+' ms: '+label));}},200);});
 
+async function engineStep(raw,now){
+  await step('Siklus engine penuh atas data asli + kontrak §9–§10',async()=>{
+    const t0=Date.now();const state=Cy.buildState({rawBySymbol:raw,now,frozen:FROZEN});const ms=Date.now()-t0;
+    const EV=['CONFIRMED','CONFLICTING_DIRECTIONS','MULTI_METHOD_COLLISION'],ST=['CLOSE_CANDIDATE','ENTRY_CONSIDER','NO_ENTRY','REJECTED_DIRECTION','REJECTED_INTEGRITY','REJECTED_RISK','CONFLICTING_DIRECTIONS','MULTI_METHOD_COLLISION'];
+    for(const r of state.history){
+      assert(EV.includes(r.event_status));assert(ST.includes(r.status));
+      if(['CLOSE_CANDIDATE','ENTRY_CONSIDER'].includes(r.status))assert.equal(r.reasons.length,0);else assert(r.reasons.length>0);
+      if(r.status==='ENTRY_CONSIDER'){const s=r.scores;assert(Math.abs(s.m6_confluense_500-(s.m1_100+s.m2_100+s.m3_100+s.m4_100+s.m5_100))<1e-9);assert(r.qty>0&&r.stop_price>0);}
+      else assert.equal(r.scores.m6_confluense_500,null);
+    }
+    const act=state.book.active;
+    assert(act.length<=3&&state.book.openRiskPct<=3+1e-9&&state.book.grossPct<=100+1e-9&&new Set(act.map(p=>p.symbol)).size===act.length);
+    const c={};for(const r of state.history)c[r.status]=(c[r.status]||0)+1;
+    const cy=state.cycle.summary;
+    note('notice',`Siklus asli close ${cy.decision_available_utc}: M3 ${cy.m3===null?'null':cy.m3.toFixed(2)} · kandidat close ini ${state.cycle.records.length} · posisi aktif ${act.length} · riwayat ${JSON.stringify(c)}`);
+    return `${state.history.length} record, ${ms} ms, M3 ${cy.m3_status}`;
+  });
+}
 (async()=>{
   const tr=Tr.createTransport();
+  // Mode arsip (ARCHIVE_DIR): kline 4H asli dari data.binance.vision, hanya langkah engine/kontrak yang dijalankan.
+  if(process.env.ARCHIVE_DIR){
+    const raw={};for(const s of C.PAIRS)raw[s]=fs.readFileSync(path.join(process.env.ARCHIVE_DIR,s+'.csv'),'utf8').trim().split('\n').map(l=>Cy.toCandle(l.split(','))).slice(-Cy.KLINE_LIMIT);
+    const now=raw.BTCUSDT[raw.BTCUSDT.length-1].t+600000;
+    await engineStep(raw,now);
+    console.log(`\n${pass} PASS, ${fails.length} FAIL`);process.exit(fails.length?1:0);
+  }
   // Deteksi blokir lokasi lebih dulu supaya hasilnya jelas.
   try{const r=await fetch(Tr.REST+'/fapi/v1/time');if(r.status===451||r.status===403){const b=await r.text();note('warning','Binance menolak lokasi server uji (HTTP '+r.status+'): '+b.slice(0,160));process.exit(3);}}
   catch(e){note('warning','Binance tidak terjangkau dari server uji: '+e.message);process.exit(3);}
-  let raw={},rows={},state=null;
+  let raw={},rows={};
   await step('REST /fapi/v1/time: sinkron jam server',async()=>{const off=await tr.syncClock();assert(Math.abs(off)<120000,'selisih jam '+off);return 'offset '+Math.round(off)+' ms';});
   await step('REST /fapi/v1/klines 4H × 6 pair (limit 1500): lengkap, valid §1, ada candle berjalan',async()=>{
     const out=[];
@@ -36,22 +61,7 @@ const wait=(cond,ms,label)=>new Promise((res,rej)=>{const t0=Date.now();const iv
     }
     return out.join(', ');
   });
-  await step('Siklus engine penuh atas data asli + kontrak §9–§10',async()=>{
-    const t0=Date.now();state=Cy.buildState({rawBySymbol:raw,now:tr.serverNow(),frozen:FROZEN});const ms=Date.now()-t0;
-    const EV=['CONFIRMED','CONFLICTING_DIRECTIONS','MULTI_METHOD_COLLISION'],ST=['CLOSE_CANDIDATE','ENTRY_CONSIDER','NO_ENTRY','REJECTED_DIRECTION','REJECTED_INTEGRITY','REJECTED_RISK','CONFLICTING_DIRECTIONS','MULTI_METHOD_COLLISION'];
-    for(const r of state.history){
-      assert(EV.includes(r.event_status));assert(ST.includes(r.status));
-      if(['CLOSE_CANDIDATE','ENTRY_CONSIDER'].includes(r.status))assert.equal(r.reasons.length,0);else assert(r.reasons.length>0);
-      if(r.status==='ENTRY_CONSIDER'){const s=r.scores;assert(Math.abs(s.m6_confluense_500-(s.m1_100+s.m2_100+s.m3_100+s.m4_100+s.m5_100))<1e-9);assert(r.qty>0&&r.stop_price>0);}
-      else assert.equal(r.scores.m6_confluense_500,null);
-    }
-    const act=state.book.active;
-    assert(act.length<=3&&state.book.openRiskPct<=3+1e-9&&state.book.grossPct<=100+1e-9&&new Set(act.map(p=>p.symbol)).size===act.length);
-    const c={};for(const r of state.history)c[r.status]=(c[r.status]||0)+1;
-    const cy=state.cycle.summary;
-    note('notice',`Siklus asli close ${cy.decision_available_utc}: M3 ${cy.m3===null?'null':cy.m3.toFixed(2)} · kandidat close ini ${state.cycle.records.length} · posisi aktif ${act.length} · riwayat ${JSON.stringify(c)}`);
-    return `${state.history.length} record, ${ms} ms, M3 ${cy.m3_status}`;
-  });
+  await engineStep(raw,tr.serverNow());
   await step('REST /fapi/v1/openInterest × 6 pair',async()=>{const o=[];for(const s of C.PAIRS){const v=await tr.openInterest(s);assert(v>0,s+' OI '+v);o.push(s+' '+v);}return o.join(', ');});
   await step('WebSocket ticker 6 pair (/market/stream …@ticker): harga live konsisten dengan kline',async()=>{
     assert(typeof WebSocket==='function','Node tanpa WebSocket global');

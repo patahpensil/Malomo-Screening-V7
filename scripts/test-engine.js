@@ -83,6 +83,22 @@ test('Satu event per (pair, side, pivot); deret terpotong di arsip → CENSORED,
   assert.equal(G.finalize(G.breakout(c,ind,piv,{symbol:'X'}),true).find(x=>x.side==='LONG').status,'CENSORED');
 });
 
+test('Breakout §4.2 (paritas arsip 410/410): pivot yang event-nya INVALID boleh membangkitkan event baru sesudahnya',()=>{
+  const r=base();r.push([100,107.5,99.5,107],[107,107,104,104.5],[104.5,107.6,104.4,107.2],[107.2,107.3,105.05,106.5],...flat(4,106.5));const c=mk(r),{ind,piv}=analyze(c);
+  const ev=G.breakout(c,ind,piv,{symbol:'X'}).filter(x=>x.side==='LONG');
+  assert.equal(ev.length,2);assert.equal(ev[0].status,'INVALID');assert.equal(ev[1].keyIdx,ev[0].keyIdx);assert.equal(ev[1].t0,22);assert.equal(ev[1].status,'CONFIRMED');
+});
+test('Breakout §4.2: selama event masih aktif di satu sisi, pivot baru tidak membangkitkan event kedua',()=>{
+  const r=base();r.push([100,107.5,106.2,107],[107,108,106.3,107.5],[107.5,112,107,108],[108,108.5,106.4,107.6],[107.6,108,106.3,107.7],[107.7,113,107.6,112.5],[112.5,113,111,112],...flat(4,112));
+  const c=mk(r),{ind,piv}=analyze(c);assert(piv.highs.some(p=>p.i===22),'pivot baru terbentuk');
+  const ev=G.breakout(c,ind,piv,{symbol:'X'}).filter(x=>x.side==='LONG');
+  assert.equal(ev.filter(e=>e.t0>20&&e.t0<=26).length,0,'tidak boleh ada break baru sebelum event pertama selesai');
+});
+test('M2 E4 (paritas arsip): Breakout memakai penyebut + 1e−12 seperti array beku; Pullback/Reversal tanpa epsilon',()=>{
+  const c=mk(zigzag([100,120]));const t=c.length-1;
+  const b=M2.features(c,t,1,'BREAKOUT_RETEST').raw.e4,p=M2.features(c,t,1,'PULLBACK_CONTINUATION').raw.e4;
+  assert.equal(p,1);assert(b<1&&b>1-1e-9);let d=0;for(let j=t-3;j<=t;j++)d+=Math.abs(Math.log(c[j].close/c[j-1].close));near(b,d/(d+1e-12),1e-15);
+});
 // ---------- Pullback ----------
 const UP=[100,110,104,116,108,122];
 test('Pullback: setup lahir di close i+2 saat tren BULLISH; zona 0.25–0.75; trigger micro-break; skor 5Q+10Loc+5+10Tim',()=>{

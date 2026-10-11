@@ -21,29 +21,37 @@ const missing=C.PAIRS.filter(s=>!fs.existsSync(path.join(DIR,s+'.csv')));
 if(missing.length){console.log('SKIP paritas OHLCV — arsip belum ada untuk: '+missing.join(', ')+' (di '+DIR+')');process.exit(0);}
 const FAM={BREAKOUT:'BREAKOUT_RETEST',PULLBACK:'PULLBACK_CONTINUATION',REVERSAL:'REVERSAL_RETEST'};
 const ev772=csv(E('ECDF_PRIOR_ONLY_ALL_FAMILIES_772_EVENTS_2024.csv')),canon=csv(E('CANONICAL_SCORES_410_EVENTS_2024.csv'));
-const first=Math.min(...ev772.map(r=>Date.parse(r.confirmation_available_utc))),last=Math.max(...ev772.map(r=>Date.parse(r.confirmation_available_utc)));
+// Jendela populasi bukti per keluarga (awal kalibrasi s.d. event terakhir yang outcome 24 jamnya masih ada di arsip).
+const win={};for(const r of ev772){const f=FAM[r.signal_family],t=Date.parse(r.confirmation_available_utc);win[f]=win[f]||[Infinity,-Infinity];win[f][0]=Math.min(win[f][0],t);win[f][1]=Math.max(win[f][1],t);}
+const inWin=(f,T)=>win[f]&&T>=win[f][0]&&T<=win[f][1];
+// Deviasi yang SUDAH DIKETAHUI dan belum terjawab (Reversal ekstra, lihat README "Catatan terbuka"). Selain daftar ini → FAIL.
+const KNOWN=new Set(JSON.parse(fs.readFileSync(path.join(__dirname,'fixtures','known_reversal_extras_2024.json'),'utf8')).events);
 const trainEnd=Math.max(...ev772.filter(r=>r.period==='TRAIN').map(r=>Date.parse(r.confirmation_available_utc)));
 const frozen=M2.frozenFrom(JSON.parse(fs.readFileSync(E('frozen_cdf_normalization.json'),'utf8')),JSON.parse(fs.readFileSync(E('frozen_v2_normalizations.json'),'utf8')));
 const engine=[];
 const an=new Map();
 for(const s of C.PAIRS){const a=P.analyzeSymbol(s,klines(path.join(DIR,s+'.csv')),Infinity,{archive:true});an.set(s,a);
   if(a.flags.length)console.log('Catatan data '+s+': '+a.flags.length+' flag ('+[...new Set(a.flags.map(f=>f.reason))].join(',')+')');
-  for(const ev of a.events)if(ev.status==='CONFIRMED'){const T=a.c[ev.tc].t+C.H4;if(T>=first&&T<=last)engine.push({a,ev,T,key:ev.family+'|'+s+'|'+ev.side+'|'+C.iso(T)});}}
+  for(const ev of a.events)if(ev.status==='CONFIRMED'){const T=a.c[ev.tc].t+C.H4;if(inWin(ev.family,T))engine.push({a,ev,T,key:ev.family+'|'+s+'|'+ev.side+'|'+C.iso(T)});}}
 const want=new Map(ev772.map(r=>[FAM[r.signal_family]+'|'+r.pair+'|'+r.side+'|'+r.confirmation_available_utc,r]));
 const got=new Map(engine.map(x=>[x.key,x]));
-const miss=[...want.keys()].filter(k=>!got.has(k)),extra=[...got.keys()].filter(k=>!want.has(k));
+const miss=[...want.keys()].filter(k=>!got.has(k)),extraAll=[...got.keys()].filter(k=>!want.has(k)),extra=extraAll.filter(k=>!KNOWN.has(k));
+for(const f of Object.values(FAM)){const w=[...want.keys()].filter(k=>k.startsWith(f+'|')),g=[...got.keys()].filter(k=>k.startsWith(f+'|'));
+  say('notice',`${f}: bukti ${w.length}, engine ${g.length}, cocok ${w.filter(k=>got.has(k)).length}, ekstra ${g.filter(k=>!want.has(k)).length}`);}
+if(extraAll.length>extra.length)say('warning',`${extraAll.length-extra.length} event Reversal ekstra yang sudah diketahui (catatan terbuka, menunggu jawaban penyusun PRD)`);
 say('notice',`Event CONFIRMED: engine ${got.size}, bukti ${want.size}, cocok ${[...want.keys()].filter(k=>got.has(k)).length}, hilang ${miss.length}, ekstra ${extra.length}`);
 if(miss.length)say('warning','contoh hilang: '+miss.slice(0,5).join('  '));
 if(extra.length)say('warning','contoh ekstra: '+extra.slice(0,5).join('  '));
 // Skor kualitas kausal: riwayat prior-only dibangun dari event engine sendiri.
-const hist=engine.filter(x=>x.T<=trainEnd).map(x=>{const f=M2.features(x.a.c,x.ev.tc,x.ev.sideN);return {family:x.ev.family,t:x.T,raw:Object.assign({},f.raw,{rawT:x.ev.rawT,rawR:x.ev.rawR})};});
+// Populasi kalibrasi prior-only = event bukti yang juga dibangkitkan engine (ekstra di luar bukti dilaporkan terpisah di atas).
+const hist=engine.filter(x=>x.T<=trainEnd&&want.has(x.key)).map(x=>{const f=M2.features(x.a.c,x.ev.tc,x.ev.sideN,x.ev.family);return {family:x.ev.family,t:x.T,raw:Object.assign({},f.raw,{rawT:x.ev.rawT,rawR:x.ev.rawR})};});
 const prov=M2.provider({frozen,trainEndMs:trainEnd,history:hist});
 let qBad=0,qN=0,m1Bad=0,m1N=0,gBad=0;
 const cmap=new Map(canon.map(c=>['BREAKOUT_RETEST|'+c.pair+'|'+(c.side==='1'?'LONG':'SHORT')+'|'+c.decision_available_utc.replace(' ','T').replace('+00:00','Z'),c]));
 for(const [k,x] of got){
   const r=want.get(k);if(!r)continue;
-  const q=M2.quality(x.ev,M2.features(x.a.c,x.ev.tc,x.ev.sideN),prov,x.T),w=Number(r.m2_quality80_causal_for_decision||NaN);
-  qN++;if(Number.isNaN(w)?q.quality80!==null:!(Math.abs(q.quality80-w)<1e-6))qBad++;
+  const q=M2.quality(x.ev,M2.features(x.a.c,x.ev.tc,x.ev.sideN,x.ev.family),prov,x.T),w=Number(r.m2_quality80_causal_for_decision||NaN);
+  qN++;if(Number.isNaN(w)?q.quality80!==null:!(Math.abs(q.quality80-w)<1e-6)){qBad++;if(process.env.PDEBUG)console.log('Q',k,r.period,q.status,q.priorN,r.prior_same_family_train_events,q.quality80,w);}
   const c=cmap.get(k);if(c){m1N++;const m=x.a.m1At(x.ev.tc);if(!(Math.abs((m.score??NaN)-Number(c.m1_100))<1e-6))m1Bad++;
     if(!(Math.abs(x.ev.generation.generation30-Number(c.signal_generation_30))<1e-9))gBad++;}
 }

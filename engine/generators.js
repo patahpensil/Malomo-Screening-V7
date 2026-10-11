@@ -23,9 +23,13 @@
   function breakout(c,ind,piv,{symbol}={}){
     const events=[],used={LONG:new Set(),SHORT:new Set()},active=[];
     for(let t=1;t<c.length;t++){
-      for(const ev of active.splice(0))if(ev.status==='WAITING_RETEST'){stepRetest(ev,c,t);if(ev.status==='WAITING_RETEST')active.push(ev);}
+      // Event selesai (apa pun hasilnya) melepas pivot-nya; pivot yang sama boleh membangkitkan event baru sesudahnya.
+      for(const ev of active.splice(0))if(ev.status==='WAITING_RETEST'){stepRetest(ev,c,t);if(ev.status==='WAITING_RETEST')active.push(ev);else used[ev.side].delete(ev.keyIdx);}
       const A=ind.atr[t-1];if(!(fin(A)&&A>0))continue;
       for(const side of ['LONG','SHORT']){
+        // §4.2: satu event aktif per (pair, side, pivot) dan level tidak diganti pivot baru sampai event selesai
+        // → selama ada event aktif di sisi ini, tidak ada break baru (mereproduksi 410/410 event arsip 2024).
+        if(active.some(e=>e.side===side))continue;
         const list=side==='LONG'?piv.highs:piv.lows,p=last(confirmedUpTo(list,t-1));   // level confirmed sebelum candle break
         if(!p||used[side].has(p.i))continue;
         const s=side==='LONG'?1:-1,b=RULES.b*A,L=p.price;
@@ -56,6 +60,9 @@
       if(st.label==='BULLISH'){side='SHORT';prot=last(st.ls.filter(l=>l.i<st.h2.i));}   // HL terakhir sebelum HH terbaru
       else{side='LONG';prot=last(st.hs.filter(h=>h.i<st.l2.i));}                       // LH terakhir sebelum LL terbaru
       if(!prot||used[side].has(prot.i))continue;
+      // "HL"/"LH" (§4.4): protected pivot wajib benar-benar higher low / lower high terhadap pivot sejenis sebelumnya.
+      const same=side==='SHORT'?st.ls:st.hs,k=same.indexOf(prot),prev=k>0?same[k-1]:null;
+      if(!prev||(side==='SHORT'?!(prot.price>prev.price):!(prot.price<prev.price)))continue;
       const s=side==='LONG'?1:-1,b=RULES.b*A,L=prot.price;
       if(s*(c[t-1].close-L)<=b&&s*(c[t].close-L)>b){
         used[side].add(prot.i);
@@ -78,6 +85,8 @@
       const i=t-2;if(i<0)continue;
       const st=M1.structure(piv,t);
       for(const side of ['LONG','SHORT']){
+        // §4.3: satu setup per impuls dan impuls tidak diganti di tengah setup → satu setup aktif per (symbol, side).
+        if(active.some(e=>e.side===side))continue;
         const imp=side==='LONG'?hiAt.get(i):loAt.get(i);if(!imp)continue;
         if(st.label!==(side==='LONG'?'BULLISH':'BEARISH'))continue;
         const opp=last(confirmedUpTo(side==='LONG'?piv.lows:piv.highs,t).filter(p=>p.i<i));if(!opp)continue;

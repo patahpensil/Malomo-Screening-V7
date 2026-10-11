@@ -2,7 +2,7 @@ name: Tes & Deploy Malomo V7
 # Deploy ke GitHub Pages HANYA jika semua tes lulus: engine, paritas M2, aplikasi, verifier PRD, dan uji browser.
 on:
   push:
-    branches: [main, 'uji-**']
+    branches: [main]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -26,12 +26,19 @@ jobs:
       - name: Tes engine, paritas M2, aplikasi, verifier PRD
         run: npm test
       - name: Unduh arsip kline resmi Binance 2024 (data.binance.vision, checksum resmi)
-        id: arsip
-        run: node scripts/fetch-ohlcv-2024.js || [ $? -eq 3 ]
+        run: node scripts/fetch-ohlcv-2024.js
       - name: Paritas penuh engine vs bukti 2024 dari candle asli
         if: ${{ !cancelled() }}
         run: npm run parity:ohlcv
-      - name: Uji data Binance asli (REST + WebSocket + siklus engine)
+      - name: Unduh kline 4H asli ±260 hari terakhir (data.binance.vision)
+        if: ${{ !cancelled() }}
+        run: node scripts/fetch-recent-archive.js
+      - name: Siklus engine atas data Binance asli terbaru (arsip resmi)
+        if: ${{ !cancelled() }}
+        run: node scripts/live-check.js
+        env:
+          ARCHIVE_DIR: data/recent
+      - name: Uji API Binance langsung (REST + WebSocket); dilewati bila server CI diblokir lokasi (HTTP 451)
         if: ${{ !cancelled() }}
         run: node scripts/live-check.js || [ $? -eq 3 ]
       - name: Susun situs
@@ -43,7 +50,12 @@ jobs:
       - name: Uji bug di browser (desktop + mobile, skenario terkendali)
         if: ${{ !cancelled() }}
         run: node scripts/test-browser.js
-      - name: Uji browser ujung-ke-ujung dengan data Binance asli
+      - name: Uji browser ujung-ke-ujung dengan data Binance asli terbaru (arsip resmi)
+        if: ${{ !cancelled() }}
+        run: node scripts/test-browser-live.js
+        env:
+          ARCHIVE_DIR: data/recent
+      - name: Uji browser dengan API Binance langsung; dilewati bila server CI diblokir lokasi (HTTP 451)
         if: ${{ !cancelled() }}
         run: node scripts/test-browser-live.js || [ $? -eq 3 ]
       - uses: actions/upload-pages-artifact@v3

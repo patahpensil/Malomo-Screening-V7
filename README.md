@@ -61,18 +61,22 @@ npm run test:prd         # verifier PRD (Python)
 npm run parity:ohlcv     # paritas penuh dari candle 2024; SKIP bila data/ohlcv-2024/<PAIR>.csv belum ada
 ```
 
-Yang sudah terbukti: `ewm`/ATR/ADX identik pandas; M3 identik numpy; skor kualitas M2 engine mereproduksi 681 skor kausal + 91 `null` dari CSV 772 event dan 410/410 skor in-sample Breakout. **Belum terbukti:** paritas generator & M1 dari candle mentah 2024 — butuh arsip kline Binance 4H 2024 untuk 6 pair di `data/ohlcv-2024/` (format kline Binance), lalu jalankan `npm run parity:ohlcv`.
+Yang sudah terbukti:
+- `ewm`/ATR/ADX identik pandas; M3 identik numpy.
+- **Paritas penuh dari candle asli Binance 2024** (arsip resmi data.binance.vision, checksum resmi; `npm run parity:ohlcv`): Breakout 410/410 dan Pullback 298/298 event identik; Reversal 64/64 event bukti direproduksi (+11 ekstra, lihat catatan terbuka); M1 410/410; generation30 410/410; skor kualitas 80 kausal **772/772**.
+- Paritas ini menemukan tiga perbedaan engine terhadap kode yang diuji, kini sudah diperbaiki sesuai teks PRD: (1) Breakout §4.2 "sampai event selesai tidak boleh mengganti level" → satu event aktif per sisi, dan pivot dilepas setelah event selesai; (2) Pullback §4.3 "jangan mengganti impuls di tengah setup" → satu setup aktif per sisi; (3) Reversal §4.4 protected pivot wajib HL/LH sejati. Selain itu E4 Breakout memakai penyebut + 1e−12 seperti array beku (mencegah ECDF bergeser satu langkah pada kasus searah murni).
 
 ### Catatan terbuka engine (perlu keputusan PRD)
 
 1. **Zona Pullback dilompati dalam satu candle.** Sesuai teks PRD, zona dinilai dari kedalaman `d` pada close candle (memakai `minLow`). Jika satu candle membawa `d` dari < 0.25 langsung ke 0.75–0.85, zona dianggap tidak tersentuh dan setup akhirnya `PREZONE_CENSORED`. Perlu konfirmasi apakah kode `pullback_v2` memakai rentang intrabar.
 2. **Reason `PLAN_RISK_INVALID`.** Dipakai bila stop ≤ 0 atau rencana tidak finite (M4 `D=0`). Kode ini belum ada di daftar reason PRD.
-3. **Kode reason rinci engine.** Selain enam kode PRD, engine mengisi `reasons[]` dengan kode rinci agar tidak kosong (mis. `DIRECTION_GATE`, `M3_HISTORY_INCOMPLETE:<pair>`, `CALIBRATION_INCOMPLETE`). Semua diberi label di UI; perlu diresmikan atau dipetakan di PRD.
-4. **Candle pertama deret.** TR dan ±DM pada candle pertama dianggap tak terdefinisi (previous close belum ada). Arsip historis mungkin memakai 0 atau `high−low`; pengaruhnya meluruh < 0.01% setelah warmup.
+3. **Reversal: 11 event ekstra.** Engine membangkitkan 75 event Reversal CONFIRMED pada 2024 (64 bukti + 11). Aturan tambahan generator arsip yang menyaring 11 event ini belum diketahui; daftarnya di `scripts/fixtures/known_reversal_extras_2024.json` (paritas FAIL bila muncul deviasi lain). Perlu ditanyakan ke penyusun PRD.
+4. **Kode reason rinci engine.** Selain enam kode PRD, engine mengisi `reasons[]` dengan kode rinci agar tidak kosong (mis. `DIRECTION_GATE`, `M3_HISTORY_INCOMPLETE:<pair>`, `CALIBRATION_INCOMPLETE`). Semua diberi label di UI; perlu diresmikan atau dipetakan di PRD.
+5. **Candle pertama deret.** TR dan ±DM pada candle pertama dianggap tak terdefinisi (previous close belum ada). Arsip historis mungkin memakai 0 atau `high−low`; pengaruhnya meluruh < 0.01% setelah warmup.
 
 ## Aplikasi (tahap 2–3)
 
-Aplikasi web statis (PWA) di atas engine yang sama, tanpa server, tanpa API key, tanpa order. Live di GitHub Pages: https://patahpensil.github.io/Malomo-Screening-V7/ (deploy otomatis hanya bila semua tes lulus).
+Aplikasi web statis (PWA) di atas engine yang sama, tanpa server, tanpa API key, tanpa order. Live di GitHub Pages: https://patahpensil.github.io/Malomo-Screening-V7/ (deploy otomatis hanya bila semua tes lulus). Aplikasi selalu memakai data Binance real-time; data sintetis hanya ada di tes skenario. API Binance Futures menolak server di AS (HTTP 451), jadi CI menguji data asli lewat arsip resmi data.binance.vision, dan uji API langsung dilewati bila server CI diblokir.
 
 | Modul | Isi |
 |---|---|
@@ -83,8 +87,10 @@ Aplikasi web statis (PWA) di atas engine yang sama, tanpa server, tanpa API key,
 | `app/main.js` | Jadwal siklus 5 detik setelah close 4H (jam server), cek ulang 15 detik bila open berikutnya belum muncul |
 
 ```bash
-npm test               # engine 32 + paritas M2 3 + aplikasi 25 + verifier PRD 32
-npm run test:browser   # susun _site/ lalu uji bug Chromium (desktop 1440 px + mobile 390 px, Binance di-mock)
+npm test               # engine 35 + paritas M2 3 + aplikasi 25 + verifier PRD 32
+npm run test:browser   # susun _site/ lalu uji bug Chromium (desktop 1440 px + mobile 390 px, skenario terkendali)
+node scripts/fetch-recent-archive.js && ARCHIVE_DIR=data/recent node scripts/test-browser-live.js   # data Binance asli
+node scripts/live-check.js   # API Binance langsung (REST + WebSocket); butuh jaringan yang tidak diblokir Binance
 npm run build          # _site/ saja; layani dengan server statis apa pun
 ```
 
@@ -136,7 +142,7 @@ Isi kartu berasal dari posisi simulasi `ENTRY_CONSIDER` (PRD §6), bukan dari tr
 | 1 | Engine M1–M6 + tes + paritas skor M2 | Selesai |
 | 2 | Data live Binance (pola A) dan kartu Decision (pola B) | Selesai |
 | 3 | Enam layar referensi UI/UX, PWA, GitHub Pages bergerbang tes | Selesai (uji browser 20/20) |
-| — | Paritas OHLCV 2024 dari candle mentah | Menunggu arsip kline |
+| — | Paritas OHLCV 2024 dari candle asli | Selesai (Reversal: 11 ekstra, catatan terbuka) |
 
 ## Catatan bukti
 

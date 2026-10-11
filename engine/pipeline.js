@@ -66,7 +66,7 @@
           rec.event_status=st;rec.status=st;rec.score_status='NOT_APPLICABLE';rec.reasons=[st];records.push(rec);continue;
         }
         // Skor M2 kualitas + integritas.
-        const feat=M2.features(a.c,i,ev.sideN),q=M2.quality(ev,feat,provider,T);
+        const feat=M2.features(a.c,i,ev.sideN,ev.family),q=M2.quality(ev,feat,provider,T);
         const causalOk=a.valid.slice(Math.max(0,i-180),i+1).every(Boolean)&&q.status!=='DATA_INCOMPLETE';
         const integ=M2.integrity({causalOk,dedupOk:true,conflictLog:entry});
         rec._features=feat.raw;rec._q=q;
@@ -159,7 +159,7 @@
       // Riwayat kalibrasi prior-only: seluruh event CONFIRMED (sebelum kanonisasi) dengan fitur lengkap.
       if(trainEndMs!==null&&T<=trainEndMs)for(const [,a] of analyses){
         const i=a.idxOf.get(T-H4);for(const ev of (i===undefined?[]:a.byTc.get(i)||[])){
-          const f=M2.features(a.c,i,ev.sideN);if(f.reasons.length)continue;
+          const f=M2.features(a.c,i,ev.sideN,ev.family);if(f.reasons.length)continue;
           history.push({family:ev.family,t:T,raw:Object.assign({},f.raw,{rawT:ev.rawT,rawR:ev.rawR})});
         }
       }
