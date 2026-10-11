@@ -17,7 +17,9 @@ Spesifikasi riset **enam metodologi trading berbobot (M1–M5) dan M6 CONFLUENSE
 | `MANIFEST_SHA256.json` | Hash SHA-256 semua berkas paket |
 | `evidence/` | Data bukti 2024: skor kanonis 410 event Breakout (in-sample), skor kausal ECDF prior-only 772 event, array kalibrasi beku, kontrak generator v2 |
 | `docs/uiux/REFERENSI_UIUX_SCREENING_MALOMO_V1.md` | Referensi UI/UX untuk menampilkan output PRD |
-| `engine/`, `scripts/` | Engine JavaScript dan tes (lihat bagian Engine) |
+| `engine/` | Engine JavaScript M1–M6 (lihat bagian Engine) |
+| `app/` | Aplikasi web/PWA enam layar (lihat bagian Aplikasi) |
+| `scripts/` | Tes, uji browser, penyusun situs |
 
 ## Ringkasan model
 
@@ -54,7 +56,7 @@ Fungsi murni JavaScript (UMD: jalan di Node dan browser), kausal, tanpa DOM, jar
 | `engine/pipeline.js` | Kanonisasi, gate arah, CLOSE_CANDIDATE → ENTRY_REVIEW, ranking tie-break, keluaran kontrak JSON §10, replay arsip (§8–§10) |
 
 ```bash
-npm test                 # 32 tes engine + 3 tes paritas skor M2 terhadap evidence
+npm run test:engine      # 32 tes engine + 3 tes paritas skor M2 terhadap evidence
 npm run test:prd         # verifier PRD (Python)
 npm run parity:ohlcv     # paritas penuh dari candle 2024; SKIP bila data/ohlcv-2024/<PAIR>.csv belum ada
 ```
@@ -65,7 +67,32 @@ Yang sudah terbukti: `ewm`/ATR/ADX identik pandas; M3 identik numpy; skor kualit
 
 1. **Zona Pullback dilompati dalam satu candle.** Sesuai teks PRD, zona dinilai dari kedalaman `d` pada close candle (memakai `minLow`). Jika satu candle membawa `d` dari < 0.25 langsung ke 0.75–0.85, zona dianggap tidak tersentuh dan setup akhirnya `PREZONE_CENSORED`. Perlu konfirmasi apakah kode `pullback_v2` memakai rentang intrabar.
 2. **Reason `PLAN_RISK_INVALID`.** Dipakai bila stop ≤ 0 atau rencana tidak finite (M4 `D=0`). Kode ini belum ada di daftar reason PRD.
-3. **Candle pertama deret.** TR dan ±DM pada candle pertama dianggap tak terdefinisi (previous close belum ada). Arsip historis mungkin memakai 0 atau `high−low`; pengaruhnya meluruh < 0.01% setelah warmup.
+3. **Kode reason rinci engine.** Selain enam kode PRD, engine mengisi `reasons[]` dengan kode rinci agar tidak kosong (mis. `DIRECTION_GATE`, `M3_HISTORY_INCOMPLETE:<pair>`, `CALIBRATION_INCOMPLETE`). Semua diberi label di UI; perlu diresmikan atau dipetakan di PRD.
+4. **Candle pertama deret.** TR dan ±DM pada candle pertama dianggap tak terdefinisi (previous close belum ada). Arsip historis mungkin memakai 0 atau `high−low`; pengaruhnya meluruh < 0.01% setelah warmup.
+
+## Aplikasi (tahap 2–3)
+
+Aplikasi web statis (PWA) di atas engine yang sama, tanpa server, tanpa API key, tanpa order. Live di GitHub Pages: https://patahpensil.github.io/Malomo-Screening-V7/ (deploy otomatis hanya bila semua tes lulus).
+
+| Modul | Isi |
+|---|---|
+| `app/transport.js` | Pola A: antrean REST 200 ms, timeout 20 s, cooldown 429/418 + `Retry-After`, sinkron jam server, cache kline 4H sampai candle berjalan close, retry `FETCH_FAILED` 30/60/120 s (PRD §1), WebSocket ticker + watchdog 20 s + reconnect bertahap. Hanya path publik baca-saja yang diizinkan. |
+| `app/live.js` | Pola A: aggTrade (CVD), depth20 (orderbook), poll Open Interest untuk posisi simulasi aktif — tampilan saja, tidak masuk skor (PRD §4.5) |
+| `app/cycle.js` | Satu siklus 4H: kline → engine `decide` kronologis atas 1.500 candle terakhir (portofolio simulasi §6: slot 24 jam, ekuitas 100 tanpa kompaun), dua fase `CLOSE_CANDIDATE` → `ENTRY_REVIEW`, penandaan `FETCH_FAILED`/`CONFIRMED_GAP`, outcome riset stop/target/horizon 24 jam |
+| `app/ui.js`, `app/labels.js` | Enam layar Referensi UI/UX (Siklus 4H, Inspektor, Papan Event, Portofolio Simulasi dengan kartu Decision pola B, Konteks Pasar, Audit & Data) dan kamus label §6 |
+| `app/main.js` | Jadwal siklus 5 detik setelah close 4H (jam server), cek ulang 15 detik bila open berikutnya belum muncul |
+
+```bash
+npm test               # engine 32 + paritas M2 3 + aplikasi 25 + verifier PRD 32
+npm run test:browser   # susun _site/ lalu uji bug Chromium (desktop 1440 px + mobile 390 px, Binance di-mock)
+npm run build          # _site/ saja; layani dengan server statis apa pun
+```
+
+Batas yang disengaja:
+- Portofolio simulasi direplay dari candle pertama yang diunduh (±250 hari); tidak dicampur dengan akun Binance asli.
+- Kalibrasi live = array beku 2024 (`FROZEN_COMPLETE_TRAIN_ECDF`), tanpa fitting ulang.
+- Selama ada pair `FETCH_FAILED` untuk close terakhir, keputusan yang bergantung lintas pair (ranking/alokasi) ditahan sebagai `NO_ENTRY` + `DATA_INCOMPLETE`.
+- Notifikasi Telegram (Referensi UI/UX §7) **belum dibangun**: butuh token bot yang tidak boleh disimpan di aplikasi statis; perlu keputusan terpisah.
 
 ## Hubungan dengan ICT Screening
 
@@ -106,9 +133,10 @@ Isi kartu berasal dari posisi simulasi `ENTRY_CONSIDER` (PRD §6), bukan dari tr
 
 | Tahap | Isi | Status |
 |---|---|---|
-| 1 | Engine M1–M6 + tes + paritas skor M2 | Selesai (`npm test` 35/35) |
-| 2 | Data live Binance (pola A) dan layar Decision (pola B) | Berikutnya |
-| 3 | Layar lain sesuai referensi UI/UX, PWA, GitHub Pages | Menyusul |
+| 1 | Engine M1–M6 + tes + paritas skor M2 | Selesai |
+| 2 | Data live Binance (pola A) dan kartu Decision (pola B) | Selesai |
+| 3 | Enam layar referensi UI/UX, PWA, GitHub Pages bergerbang tes | Selesai (uji browser 20/20) |
+| — | Paritas OHLCV 2024 dari candle mentah | Menunggu arsip kline |
 
 ## Catatan bukti
 

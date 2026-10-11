@@ -12,6 +12,7 @@
   const FAMILY_ORDER=['BREAKOUT_RETEST','PULLBACK_CONTINUATION','REVERSAL_RETEST'];
 
   // Analisis satu simbol atas candle yang sudah close. Semua langkah kausal, jadi indeks k hanya bergantung pada c[0..k].
+  const closesOf=analyses=>{const m=new Map();for(const [s,a] of analyses)m.set(s,new Map(a.c.map(x=>[x.t,x.close])));return m;};
   function analyzeSymbol(symbol,raw,nowMs,{archive=false}={}){
     const prep=C.prepare(raw,nowMs);
     const c=prep.candles.slice(prep.segStart),valid=prep.valid.slice(prep.segStart);
@@ -37,10 +38,10 @@
   /* Satu siklus keputusan pada T (= close candle t = decision_available_utc).
      analyses: Map simbol → analyzeSymbol(...). entryOpen(symbol) → open candle t+1 atau null (fase CLOSE_CANDIDATE).
      provider: M2.provider(...). portfolio: {positions}. log: array tujuan catatan audit. */
-  function decide(T,analyses,{provider,portfolio={positions:[]},entryOpen=()=>null,log=[],pairs=PAIRS}={}){
+  function decide(T,analyses,{provider,portfolio={positions:[]},entryOpen=()=>null,log=[],pairs=PAIRS,closes=null}={}){
     const tOpen=T-H4,records=[],conflictLogs=[];
-    // M3 sekali per timestamp (konteks bersama).
-    const closes=new Map();for(const [s,a] of analyses)closes.set(s,new Map(a.c.map(x=>[x.t,x.close])));
+    // M3 sekali per timestamp (konteks bersama). `closes` boleh diberikan pemanggil (peta yang sama) agar replay tidak membangun ulang tiap T.
+    if(!closes){closes=new Map();for(const [s,a] of analyses)closes.set(s,new Map(a.c.map(x=>[x.t,x.close])));}
     const m3=R.m3(closes,tOpen,pairs);
     for(const [symbol,a] of analyses){
       const i=a.idxOf.get(tOpen);
@@ -150,10 +151,10 @@
     const history=[],prov=M2.provider({frozen,trainEndMs,history:trainEndMs===null?null:history});
     const times=new Set();for(const [,a] of analyses)for(const x of a.c)times.add(x.t+H4);
     const Ts=[...times].filter(T=>T>=startMs&&T<=endMs).sort((a,b)=>a-b);
-    let portfolio={positions:[]};const out=[],log=[];
+    let portfolio={positions:[]};const out=[],log=[],closes=closesOf(analyses);
     for(const T of Ts){
       const entryOpen=s=>{const a=analyses.get(s),k=a.idxOf.get(T);return k===undefined?null:a.c[k].open;};
-      const res=decide(T,analyses,{provider:prov,portfolio,entryOpen,log,pairs});
+      const res=decide(T,analyses,{provider:prov,portfolio,entryOpen,log,pairs,closes});
       portfolio=res.portfolio;out.push(...res.records);
       // Riwayat kalibrasi prior-only: seluruh event CONFIRMED (sebelum kanonisasi) dengan fitur lengkap.
       if(trainEndMs!==null&&T<=trainEndMs)for(const [,a] of analyses){
@@ -165,5 +166,5 @@
     }
     return {records:out,log,analyses};
   }
-  return {SCHEMA,SCORE_VERSION,analyzeSymbol,decide,pending,replay,compare:cmp};
+  return {SCHEMA,SCORE_VERSION,analyzeSymbol,closesOf,decide,pending,replay,compare:cmp};
 });

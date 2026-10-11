@@ -1,12 +1,21 @@
 {
   "name": "malomo-screening-v7",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Engine riset Malomo V7 — M1–M6 Confluense (PRD v1.0.7), Binance USDⓈ-M Futures 4H",
+  "description": "Malomo Screening V7 — riset M1–M6 Confluense (PRD v1.0.7), Binance USDⓈ-M Futures 4H",
   "scripts": {
-    "test": "node scripts/test-engine.js && node scripts/test-parity-m2.js",
+    "test": "node scripts/run-tests.js",
+    "test:engine": "node scripts/test-engine.js && node scripts/test-parity-m2.js",
+    "test:app": "node scripts/test-app.js",
     "test:prd": "python3 verify_final_prd.py",
+    "test:browser": "node scripts/build-site.js && node scripts/test-browser.js",
+    "build": "node scripts/build-site.js",
     "parity:ohlcv": "node scripts/parity-ohlcv.js"
   },
-  "engines": {"node": ">=20"}
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "playwright": "1.56.0"
+  }
 }
