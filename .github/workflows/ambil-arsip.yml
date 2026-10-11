@@ -1,0 +1,28 @@
+name: Ambil arsip kline Binance asli
+# Mengunduh arsip resmi data.binance.vision (2024 untuk paritas PRD, ±260 hari terakhir untuk uji data asli)
+# lalu menyimpannya ke cabang data-arsip. Dijalankan dengan push ke cabang ambil-arsip.
+on:
+  push:
+    branches: [ambil-arsip]
+permissions:
+  contents: write
+jobs:
+  ambil:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node scripts/fetch-ohlcv-2024.js
+      - run: node scripts/fetch-recent-archive.js
+      - name: Simpan ke cabang data-arsip
+        run: |
+          mkdir /tmp/arsip && cp -r data/ohlcv-2024 data/recent /tmp/arsip/
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan data-arsip
+          git rm -rf -q . && rm -rf data
+          mkdir data && cp -r /tmp/arsip/* data/
+          git add data && git commit -q -m "Arsip kline 4H Binance USDⓈ-M resmi (data.binance.vision, checksum resmi)"
+          git push -f origin data-arsip
