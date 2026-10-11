@@ -1,0 +1,26 @@
+name: Ambil data backtest Tahap A
+on:
+  push:
+    branches: [ambil-bt]
+permissions:
+  contents: write
+jobs:
+  ambil:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node scripts/backtest/fetch-universe.js
+      - name: Simpan ke cabang data-bt
+        run: |
+          mkdir /tmp/bt && cp -r data/bt/* /tmp/bt/
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan data-bt
+          git rm -rf -q . && rm -rf data
+          mkdir -p data/bt && cp -r /tmp/bt/* data/bt/
+          git add data && git commit -q -m "Data backtest Tahap A (data.binance.vision)"
+          git push -f origin data-bt
