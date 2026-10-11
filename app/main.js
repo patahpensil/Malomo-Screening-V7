@@ -1,13 +1,15 @@
 /* Malomo V7 — orkestrasi aplikasi: ambil data publik → engine PRD → tampilan.
    Siklus mengikuti close 4H (jam server Binance). Tanpa order, tanpa API key, tanpa penyimpanan keputusan di luar memori;
-   localStorage hanya untuk kenyamanan tampilan (layar & filter terakhir). */
+   localStorage hanya untuk kenyamanan tampilan (layar & filter terakhir) dan pengaturan rencana siap salin R32
+   (modal, risiko, biaya) yang hanya hidup di browser ini. */
 (function(root){
   'use strict';
-  const M=root.Malomo,C=M.core,Cy=M.cycle,U=M.ui,L=M.labels,Tr=M.transport;
+  const M=root.Malomo,C=M.core,Cy=M.cycle,U=M.ui,L=M.labels,Tr=M.transport,X=M.exec;
   const $=id=>document.getElementById(id);
   const SCREENS=['siklus','event','portofolio','pasar','audit'];
   const app={state:null,loading:true,frozen:null,meta:{files:{},build:null},raw:{},failed:new Set(),cycleId:0,
-    view:{screen:'siklus',selected:null,tab:'skor',filters:{pair:'',side:'',family:'',status:''}},timers:{}};
+    view:{screen:'siklus',selected:null,tab:'skor',filters:{pair:'',side:'',family:'',status:'',btc:''}},timers:{},
+    exec:{settings:{capital:'',riskPct:String(X.DEFAULTS.riskPct),costBps:String(X.DEFAULTS.costBps)},rules:{},rulesAt:null,rulesError:null,rulesErrorAt:null,rulesLoading:false}};
   const transport=Tr.createTransport();
   const live=M.live.createLive({openInterest:s=>transport.openInterest(s)});
   let ticker=null;
@@ -64,6 +66,22 @@
     app.timers.cycle=setTimeout(runCycle,waitingOpen?15000:Math.max(1000,next-now));
   }
 
+  // ---------- aturan pair (R32): exchangeInfo publik, diperbarui tiap 24 jam; gagal → rencana tampil belum dibulatkan ----------
+  async function loadRules(){
+    const ex=app.exec;if(ex.rulesLoading)return;ex.rulesLoading=true;
+    const res=await Tr.withRetry(()=>transport.exchangeInfo());
+    ex.rulesLoading=false;
+    if(res.ok){const parsed=X.parseRules(res.value,C.PAIRS);ex.rules=parsed;ex.rulesAt=transport.serverNow();ex.rulesError=Object.keys(parsed).length?null:'FORMAT';ex.rulesErrorAt=ex.rulesError?transport.serverNow():null;}
+    else{ex.rulesError=String(res.error&&res.error.message||res.error);ex.rulesErrorAt=transport.serverNow();}
+    render();
+  }
+  function rulesDue(){
+    const ex=app.exec,now=transport.serverNow();
+    if(ex.rulesLoading)return false;
+    if(ex.rulesError)return now-ex.rulesErrorAt>10*60000;
+    return !ex.rulesAt||now-ex.rulesAt>X.RULES_TTL_MS;
+  }
+
   // ---------- tampilan ----------
   function setScreen(s){
     if(!SCREENS.includes(s))s='siklus';app.view.screen=s;store('screen',s);
@@ -79,10 +97,10 @@
     let html;
     if(!st&&app.failed.size&&!app.error)html=`<div class="empty"><b>Data Binance belum berhasil diambil (FETCH_FAILED).</b><br>Dicoba ulang otomatis dengan jeda 30/60/120 detik, lalu lagi pada close 4H berikutnya. Tidak ada skor yang dihitung tanpa data.</div>`;
     else if(app.error&&!st)html=`<div class="empty"><b>Gagal menyusun siklus.</b><br>${L.esc(app.error.message)}</div>`;
-    else html=v.screen==='event'?U.board(st):v.screen==='portofolio'?U.portofolio(st,liveView(),transport.serverNow()):v.screen==='pasar'?U.pasar(st):v.screen==='audit'?U.audit(st,app.meta):U.siklus(st,v);
+    else html=v.screen==='event'?U.board(st):v.screen==='portofolio'?U.portofolio(st,liveView(),transport.serverNow(),app.exec):v.screen==='pasar'?U.pasar(st):v.screen==='audit'?U.audit(st,app.meta):U.siklus(st,v);
     $('content').innerHTML=html;
     const rec=findRecord(v.selected),insp=$('inspector');
-    if(rec){insp.innerHTML=U.inspector(rec,st,v);insp.hidden=false;}else{insp.hidden=true;insp.innerHTML='';}
+    if(rec){insp.innerHTML=U.inspector(rec,st,v,app.exec);insp.hidden=false;}else{insp.hidden=true;insp.innerHTML='';}
     document.querySelector('.workspace').classList.toggle('no-insp',!rec);
     tickClock();
   }
@@ -93,7 +111,8 @@
   }
   function tick(){
     tickClock();live.tick();if(ticker)ticker.watchdog();
-    if(app.view.screen==='portofolio'&&app.state){const el=$('slots');if(el)el.innerHTML=U.slots(app.state,liveView(),transport.serverNow());}
+    if(app.view.screen==='portofolio'&&app.state){const el=$('slots');if(el)el.innerHTML=U.slots(app.state,liveView(),transport.serverNow(),app.exec);}
+    if(app.frozen&&rulesDue())loadRules();
     // Close 4H terlewati (mis. tab tidur) → jalankan siklus sekarang.
     if(app.state&&Cy.lastClosedT(transport.serverNow())>app.state.T&&!app.timers.catchup){app.timers.catchup=setTimeout(()=>{app.timers.catchup=null;runCycle();},5000);}
   }
@@ -107,6 +126,7 @@
       if(act){
         const a=act.dataset.action,rec=findRecord(app.view.selected);
         if(a==='close-insp'){app.view.selected=null;render();return;}
+        if(a==='copy-val'){ev.stopPropagation();const txt=act.dataset.val||'';(navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject()).then(()=>{act.textContent='Tersalin';},()=>{act.textContent='Gagal';});return;}
         if(a==='copy-json'&&rec){const txt=JSON.stringify(Cy.publicRecord(rec),null,2);(navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject()).then(()=>{act.textContent='Tersalin';},()=>{act.textContent='Gagal menyalin';});return;}
         if(a==='download-json'&&rec){download(rec.symbol+'_'+rec.side+'_'+rec.decision_available_utc.replace(/[:]/g,'')+'.json',JSON.stringify(Cy.publicRecord(rec),null,2),'application/json');return;}
         if(a==='download-audit'&&app.state){download('malomo_v7_audit_'+C.iso(app.state.T).replace(/[:]/g,'')+'.jsonl',Cy.auditLines(app.state),'application/x-ndjson');return;}
@@ -116,8 +136,10 @@
       const r=t.closest('[data-rec]');if(r){app.view.selected=r.dataset.rec;app.view.tab='skor';render();}
     });
     document.addEventListener('change',ev=>{
+      const x=ev.target.closest('[data-exec]');
+      if(x){const k=x.dataset.exec;if(!['capital','riskPct','costBps'].includes(k))return;app.exec.settings[k]=String(x.value).trim();store('exec',app.exec.settings);render();return;}
       const f=ev.target.closest('[data-filter]');if(!f)return;
-      const k={pair:'pair',arah:'side',keluarga:'family',status:'status'}[f.dataset.filter];
+      const k={pair:'pair',arah:'side',keluarga:'family',status:'status',btc:'btc'}[f.dataset.filter];
       app.view.filters[k]=f.value;store('filters',app.view.filters);render();
     });
     document.addEventListener('keydown',ev=>{if(ev.key==='Escape'&&app.view.selected){app.view.selected=null;render();}});
@@ -126,11 +148,13 @@
 
   async function boot(){
     const f=store('filters');if(f&&typeof f==='object')Object.assign(app.view.filters,f);
+    const xs=store('exec');if(xs&&typeof xs==='object')for(const k of ['capital','riskPct','costBps'])if(typeof xs[k]==='string')app.exec.settings[k]=xs[k];
     bind();setScreen(location.hash.slice(1)||store('screen')||'siklus');
     try{await loadStatic();}catch(err){app.error=err;app.loading=false;render();return;}
     ticker=Tr.createTicker({symbols:C.PAIRS,onTick:()=>{}});
     app.timers.tick=setInterval(tick,1000);
     app.timers.oi=setInterval(()=>live.pollOI(),15000);
+    loadRules();
     await runCycle();
     if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('sw.js').catch(()=>{});
   }

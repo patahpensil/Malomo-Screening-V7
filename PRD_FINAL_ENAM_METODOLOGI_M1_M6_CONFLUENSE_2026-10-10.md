@@ -1,6 +1,6 @@
 # PRD FINAL — ENAM METODOLOGI TRADING BERBOBOT & M6 CONFLUENSE
 
-**Versi:** 1.0.10-FINAL-DESIGN (revisi konsistensi dokumen atas 1.0.0; lihat Riwayat revisi)  
+**Versi:** 1.0.11-FINAL-DESIGN (revisi konsistensi dokumen atas 1.0.0; lihat Riwayat revisi)  
 **Tanggal keputusan:** 10 Oktober 2026  
 **Bahasa spesifikasi:** Indonesia; nama field dan status Inggris untuk kontrak antar-agen.  
 **Ruang lingkup:** spesifikasi metodologi penelitian dan protokol keluaran agen; **bukan permintaan membuat aplikasi, mengirim order, commit, push, atau deploy**.  
@@ -24,6 +24,7 @@
 | 1.0.8 | 11 Okt 2026 | Paritas engine terhadap candle asli Binance 2024 dan jawaban audit generator arsip: (R25) Breakout — satu event aktif per (pair,side), event lama diselesaikan dulu lalu fresh cross dievaluasi pada candle sama, pivot boleh dipakai ulang setelah event selesai (§4.2). (R26) Pullback — satu setup aktif per (symbol,side), impuls baru tidak membuka setup kedua (§4.3). (R27) Reversal — syarat harga **dan** kronologi indeks pivot `l2<l1<h1` / `h2<h1<l1`, protected = `l1`/`h1` terbaru, satu event aktif per sisi, protected pivot tidak dipakai ulang (§4.4). (R28) Epsilon penyebut E4 mengikuti versi generator: Breakout v1 `+1e−12`, Pullback/Reversal v2 tanpa epsilon (§4.5). (R29) Tes engine I07–I09: regresi 11 Reversal terlarang, pakai ulang pivot Breakout, paritas 772/772 (§11). | Menyelaraskan PRD dengan generator arsip yang diuji; **tidak mengubah bobot, rumus skor, parameter, atau populasi event historis** |
 | 1.0.9 | 11 Okt 2026 | (R30) §14 baru: hasil Tahap A — uji arsitektur sistem (backtest komposit, ablation per lapis) atas 30 pair USDⓈ-M paling likuid, Feb 2024–Okt 2026, data asli Binance; temuan per lapis, usulan perbaikan (benahi/tambah/kurangi), dan kriteria lanjut ke Tahap B. | **Temuan dan usulan**, belum mengubah aturan normatif §1–§13; perubahan aturan hanya lewat revisi terpisah setelah disetujui pengguna |
 | 1.0.10 | 11 Okt 2026 | (R31) §15 baru: hasil Tahap A2 — riset generator sinyal baru dan lapis rezim BTC (28 konfigurasi dikunci sebelum hasil dilihat), uji ketahanan kandidat terbaik, kesimpulan, dan rekomendasi arah berikutnya. | **Temuan dan usulan**, belum mengubah aturan normatif §1–§13 |
+| 1.0.11 | 11 Okt 2026 | §16 baru, disetujui pengguna untuk penggunaan uang nyata: (R32) rencana eksekusi siap salin — harga dibulatkan ke `tickSize` Binance ke arah aman, qty dari modal & risiko pengguna (0,5–1%) dibulatkan ke `stepSize`, leverage maksimum aman dihitung otomatis, aturan pair dari `/fapi/v1/exchangeInfo` publik. (R33) label rezim BTC informatif (bukan gate) + filter tampilan. Kalimat kuantisasi §6 diberi rujukan ke §16. Tanpa kill switch (keputusan pengguna). | **Lapisan tampilan**; tidak mengubah bobot, rumus skor, generator, keputusan, record audit, atau portofolio simulasi §6 |
 
 ## 0. Hirarki kewenangan dan larangan interpretasi
 
@@ -169,7 +170,7 @@ Dapatkan `E4q`, `ClosePosq`, `RVOLq`, `Takerq` dengan **ECDF beku/kausal per kel
 
 **Mandat simulasi final untuk PRD:** `equity_sim>0`, `risk_trade_max=1% equity`, `risk_open_max=3% equity`, `gross_notional_max=100% equity`, `max_concurrent_positions=3`, `one_open_position_per_pair=true`. Ini **kebijakan desain penelitian dari grid historis**, bukan rekomendasi universal atau bukti sudah aman secara eksekusi riil.
 
-**Entry referensi** ditetapkan `O_(t+1)` hanya setelah terbuka. Harga stop/target/qty pada dokumen penelitian disimpan sebagai float64 tanpa kuantisasi tick; **bukan harga order yang dapat langsung dikirim ke exchange**. Tidak ada pembuatan order dalam lingkup PRD ini. `ATR_entry=ATR14[tc]>0` dari close candle konfirmasi/trigger `tc` (bukan `ATR_frozen`; sesuai simulasi M4 historis); `stop_distance=1.5*ATR_entry`; LONG `stop=entry−stop_distance`, SHORT `stop=entry+stop_distance`, `target=entry+side*(2*stop_distance)`. Stop long harus >0; jika tidak → `REJECTED_RISK`. Angka 1.5 ATR dan 2R berasal dari baseline grid simulasi, bukan stop struktural wajib.
+**Entry referensi** ditetapkan `O_(t+1)` hanya setelah terbuka. Harga stop/target/qty pada dokumen penelitian disimpan sebagai float64 tanpa kuantisasi tick; **bukan harga order yang dapat langsung dikirim ke exchange**. Tidak ada pembuatan order dalam lingkup PRD ini. Sejak v1.0.11, lapisan tampilan §16 (R32) boleh menurunkan **rencana siap salin** yang dikuantisasi ke tick/step Binance dari record ini untuk pengguna; record, simulasi, dan ekuitas acuan §6 tetap float64 tanpa kuantisasi. `ATR_entry=ATR14[tc]>0` dari close candle konfirmasi/trigger `tc` (bukan `ATR_frozen`; sesuai simulasi M4 historis); `stop_distance=1.5*ATR_entry`; LONG `stop=entry−stop_distance`, SHORT `stop=entry+stop_distance`, `target=entry+side*(2*stop_distance)`. Stop long harus >0; jika tidak → `REJECTED_RISK`. Angka 1.5 ATR dan 2R berasal dari baseline grid simulasi, bukan stop struktural wajib.
 
 Ukuran posisi simulasi: `qty = min( (0.01*equity_sim)/abs(entry-stop), equity_sim/entry )`. `new_risk=qty*abs(entry-stop)`; `new_notional=qty*entry`. `D=1` jika entry/stop/qty finite positif dan new_risk <=1% equity, lainnya 0. `P=1` jika jumlah planned open risk **setelah** kandidat ditambah ≤3% ekuitas dan jumlah posisi ≤3 serta pair belum aktif; lainnya 0. `N=1` jika gross notional termasuk kandidat ≤1× ekuitas; lainnya 0. `M4=40D+35P+25N`.
 
@@ -718,3 +719,51 @@ H1a dengan lapis rezim BTC (generator Breakout PRD + gate arah pair + searah str
 6. **Peringatan uji berganda:** 28 konfigurasi diuji. Hasil positif tunggal (mis. t ≈ 2 pada satu tahun) wajar muncul secara kebetulan dan tidak boleh dijadikan dasar keputusan tanpa konsistensi antartahun dan uji ketahanan.
 
 **Reproduksi:** `node scripts/backtest/a2.js <data/bt> 30` → `results/tahap-a2/summary.json`.
+
+## 16. Lapisan penggunaan nyata: rencana siap salin dan label rezim BTC (v1.0.11)
+
+**Keputusan pengguna (11 Okt 2026):** aplikasi dipakai dengan **uang nyata** atas keputusan dan tanggung jawab pengguna, walaupun §14–§15 belum menemukan edge yang memenuhi syarat. Bagian ini hanya menambah **lapisan tampilan** untuk eksekusi manual; aturan normatif §1–§13 (generator, skor M1–M6, gate, keputusan, record §10, portofolio simulasi §6) **tidak berubah**. Tidak ada pengiriman order dan tidak ada API key. **Kill switch tidak diterapkan** (keputusan pengguna); acuan kondisi buruk normal dari backtest (§15, Breakout + rezim BTC, 18 bps): kalah beruntun terpanjang 10, drawdown terburuk ≈ 32% pada risiko 1% per trade.
+
+### 16.1 R32 — Rencana eksekusi siap salin
+
+**Data (publik, tanpa API key).** `GET /fapi/v1/exchangeInfo` ditambahkan ke daftar putih transport. Per pair aplikasi diambil `tickSize` (`PRICE_FILTER`), `stepSize`/`minQty`/`maxQty` (`LOT_SIZE`), minimum notional (`MIN_NOTIONAL.notional`), dan `status`. Diambil saat aplikasi dibuka dan diperbarui tiap 24 jam (gagal → dicoba ulang 30/60/120 detik, lalu tiap 10 menit). Field tidak sah atau hilang → pair **tanpa aturan**; tidak ada nilai tebakan.
+
+**Input pengguna** (tersimpan hanya di browser perangkat itu):
+
+| Input | Default | Batas sah |
+|---|---|---|
+| Modal alokasi (USDT) | kosong, wajib | > 0 |
+| Risiko per trade | 0,5% | 0,5% – 1% |
+| Perkiraan biaya round-trip | 18 bps | 0 – 50 bps |
+
+Leverage **bukan input**; dihitung otomatis per sinyal.
+
+**Perhitungan** (dasar: `entry_reference_open`, `stop_price`, `target_price` record §6):
+
+1. **Pembulatan ke kelipatan `tickSize` ke arah aman.** LONG: entry, stop, dan target dibulatkan ke bawah; SHORT: ke atas. Akibatnya entry limit tidak lebih mahal dari rencana, stop menjauh dari entry, dan target mendekat ke entry. Aritmetika memakai bilangan bulat kelipatan tick; nilai yang sudah tepat di grid tidak digeser oleh galat float (toleransi beberapa ulp, jauh di bawah satu tick).
+2. **Qty** = `floor_step( modal × risiko% ÷ (|entry − stop| + biaya × max(entry, stop)) )`. Rugi bila SL kena, termasuk biaya, tidak pernah melebihi `modal × risiko%`.
+3. **Leverage maksimum aman** `L = floor(1 ÷ (2 × jarak_stop + MMR))`, minimal 1×, maksimal batas pribadi pengguna (BTC 150×, ETH 125×, alt 50×). Menjamin perkiraan jarak likuidasi `1/L − MMR ≥ 2 × jarak_stop`. MMR adalah asumsi konservatif (BTC 0,4%, ETH 0,5%, alt 1%) karena nilai pasti hanya tersedia lewat endpoint berkunci; angka likuidasi selalu berlabel **perkiraan**.
+4. **Margin** = notional ÷ L.
+5. **Tidak bisa dieksekusi** bila qty < `minQty`, qty > `maxQty`, notional < minimum notional, margin > modal, atau urutan SL/entry/TP tidak sah setelah pembulatan. Pair dengan `status ≠ TRADING` → "Pair tidak sedang diperdagangkan".
+
+**Status tampilan:** `READY` (siap salin) · `UNROUNDED` (aturan pair tidak tersedia: angka mentah, tanpa tombol salin) · `NEED_SETTINGS` · `INVALID_SETTINGS` · `NOT_EXECUTABLE` · `PAIR_NOT_TRADING` · `NO_PLAN`.
+
+**Tampilan.** Panel "Rencana siap salin" pada kartu Decision posisi berjalan dan tab Rencana untuk record `ENTRY_CONSIDER` — **semua keluarga sinyal termasuk Reversal**. Isi: entry limit, SL, TP, qty (masing-masing dengan tombol salin), leverage maksimum aman, margin dan notional, rugi bila SL kena (USDT dan % modal, termasuk biaya), untung bila TP kena (setelah biaya), RR, jarak SL, dan perkiraan jarak/harga likuidasi. Catatan tetap: "Set leverage di Binance ≤ L×. Pasang limit order; bila tidak terisi, lewati — jangan kejar dengan market order. Rencana ini tidak mengirim order."
+
+### 16.2 R33 — Label rezim BTC (informatif, bukan gate)
+
+Sumber: label struktur M1 BTCUSDT (pivot terkonfirmasi s.d. candle konfirmasi) pada close yang sama dengan sinyal — definisi identik dengan lapis rezim §15.
+
+| Kondisi | Label |
+|---|---|
+| LONG + BTC `BULLISH`, atau SHORT + BTC `BEARISH` | Searah BTC |
+| Arah sinyal berlawanan dengan struktur BTC | Berlawanan dengan BTC |
+| BTC `TRANSITION` | BTC transisi |
+| Data BTC tidak mencakup close itu, atau swing belum cukup | Rezim BTC: — |
+| Sinyal pada BTCUSDT | tidak ditampilkan |
+
+Label **tidak** mengubah status, skor, ranking M6, alasan penolakan, maupun record audit; altcoin dapat bergerak tanpa mengikuti BTC. Filter tampilan opsional "Searah BTC saja" hanya menyaring daftar kandidat. Catatan di kartu: backtest 2024–2026 menunjukkan sinyal searah BTC rata-rata lebih baik di ketiga tahun, tetapi belum signifikan secara statistik.
+
+### 16.3 Yang tidak berubah dan tes
+
+Tidak berubah: generator, skor M1–M6, Reversal tetap aktif, ranking M6, gate, record §10, replay portofolio §6 (ekuitas acuan 100, float64), paritas 772/772. Tes wajib sebelum deploy (`scripts/test-exec.js`, `scripts/test-browser.js`): pembulatan empat arah pada berbagai ukuran tick; 5.000 kasus acak (risiko nyata ≤ batas, kelipatan tick/step tepat, arah pembulatan, likuidasi ≥ 2× jarak SL) dan 20.000 kasus pembulatan nilai besar; contoh hitung manual; penolakan minimum notional/minQty/margin/geometri/status pair; validasi input; parser `exchangeInfo` (format resmi dan varian gabungan); lima kondisi label rezim BTC dan kesamaannya dengan definisi §15; record audit tidak berubah; tes browser desktop dan mobile (panel, tombol salin, penyimpanan pengaturan, filter, `exchangeInfo` gagal).

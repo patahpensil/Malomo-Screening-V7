@@ -10,7 +10,7 @@ Spesifikasi riset **enam metodologi trading berbobot (M1–M5) dan M6 CONFLUENSE
 
 | Berkas | Fungsi |
 |---|---|
-| `PRD_FINAL_ENAM_METODOLOGI_M1_M6_CONFLUENSE_2026-10-10.md` | **Spesifikasi normatif tunggal** (v1.0.10-FINAL-DESIGN): rumus M1–M6, status tiga lapis, kontrak JSON, acceptance test, riwayat revisi |
+| `PRD_FINAL_ENAM_METODOLOGI_M1_M6_CONFLUENSE_2026-10-10.md` | **Spesifikasi normatif tunggal** (v1.0.11-FINAL-DESIGN): rumus M1–M6, status tiga lapis, kontrak JSON, acceptance test, riwayat revisi |
 | `LAPORAN_VALIDASI_PRD_FINAL_M1_M6_2026-10-10.md` | Batas bukti dan ringkasan verifikasi tiap revisi |
 | `verify_final_prd.py` | Verifier offline (Python 3 standar, tanpa dependensi) |
 | `VALIDASI_PRD_FINAL_M1_M6.json` | Hasil verifier terakhir |
@@ -81,12 +81,13 @@ Aplikasi web statis (PWA) di atas engine yang sama, tanpa server, tanpa API key,
 |---|---|
 | `app/transport.js` | Pola A: antrean REST 200 ms, timeout 20 s, cooldown 429/418 + `Retry-After`, sinkron jam server, cache kline 4H sampai candle berjalan close, retry `FETCH_FAILED` 30/60/120 s (PRD §1), WebSocket ticker + watchdog 20 s + reconnect bertahap. Hanya path publik baca-saja yang diizinkan. |
 | `app/live.js` | Pola A: aggTrade (CVD), depth20 (orderbook), poll Open Interest untuk posisi simulasi aktif — tampilan saja, tidak masuk skor (PRD §4.5) |
-| `app/cycle.js` | Satu siklus 4H: kline → engine `decide` kronologis atas 1.500 candle terakhir (portofolio simulasi §6: slot 24 jam, ekuitas 100 tanpa kompaun), dua fase `CLOSE_CANDIDATE` → `ENTRY_REVIEW`, penandaan `FETCH_FAILED`/`CONFIRMED_GAP`, outcome riset stop/target/horizon 24 jam |
+| `app/cycle.js` | `btcRegime` (PRD §16 R33): label rezim BTC informatif, bukan gate. Satu siklus 4H: kline → engine `decide` kronologis atas 1.500 candle terakhir (portofolio simulasi §6: slot 24 jam, ekuitas 100 tanpa kompaun), dua fase `CLOSE_CANDIDATE` → `ENTRY_REVIEW`, penandaan `FETCH_FAILED`/`CONFIRMED_GAP`, outcome riset stop/target/horizon 24 jam |
 | `app/ui.js`, `app/labels.js` | Enam layar Referensi UI/UX (Siklus 4H, Inspektor, Papan Event, Portofolio Simulasi dengan kartu Decision pola B, Konteks Pasar, Audit & Data) dan kamus label §6 |
-| `app/main.js` | Jadwal siklus 5 detik setelah close 4H (jam server), cek ulang 15 detik bila open berikutnya belum muncul |
+| `app/exec.js` | PRD §16 R32 — rencana siap salin: harga dibulatkan ke `tickSize` ke arah aman (aritmetika bilangan bulat tick), qty dari modal & risiko 0,5–1% dibulatkan ke `stepSize`, leverage maksimum aman otomatis, cek minimum notional/minQty/margin, parser `/fapi/v1/exchangeInfo` publik. Tidak mengubah record audit. |
+| `app/main.js` | Jadwal siklus 5 detik setelah close 4H (jam server), cek ulang 15 detik bila open berikutnya belum muncul; aturan pair `exchangeInfo` diperbarui tiap 24 jam |
 
 ```bash
-npm test               # engine 35 + paritas M2 3 + aplikasi 25 + verifier PRD 32
+npm test               # engine 35 + paritas M2 3 + aplikasi 26 + rencana siap salin/rezim BTC 15 + verifier PRD 32
 npm run test:browser   # susun _site/ lalu uji bug Chromium (desktop 1440 px + mobile 390 px, skenario terkendali)
 node scripts/fetch-recent-archive.js && ARCHIVE_DIR=data/recent node scripts/test-browser-live.js   # data Binance asli
 node scripts/live-check.js   # API Binance langsung (REST + WebSocket); butuh jaringan yang tidak diblokir Binance
@@ -169,6 +170,7 @@ Isi kartu berasal dari posisi simulasi `ENTRY_CONSIDER` (PRD §6), bukan dari tr
 | — | Paritas OHLCV 2024 dari candle asli | Selesai (772/772 event + skor) |
 | A | Uji arsitektur: backtest komposit 30 pair likuid 2024–2026 + usulan perbaikan (PRD §14) | Selesai — belum ada edge signifikan |
 | A2 | Riset generator baru + rezim BTC, 28 konfigurasi (PRD §15) | Selesai — tidak ada yang lulus |
+| v1.0.11 | Lapisan penggunaan nyata: rencana siap salin (R32) + label rezim BTC (R33), PRD §16 | Selesai (uji browser 23/23) |
 
 ## Catatan bukti
 

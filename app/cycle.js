@@ -166,5 +166,20 @@
   // Record kontrak §10 tanpa field internal (_features, _q).
   function publicRecord(r){const o={};for(const k of Object.keys(r))if(k[0]!=='_')o[k]=r[k];return o;}
 
-  return {KLINE_LIMIT,BOARD_LOOKBACK,toCandle,lastClosedT,outcome,buildState,auditLines,publicRecord};
+  /* Label rezim BTC (PRD v1.0.11 R33) — INFORMATIF, bukan gate: tidak mengubah status, skor, ranking, atau record audit.
+     Sumber = label struktur M1 BTCUSDT (pivot terkonfirmasi s.d. candle konfirmasi) pada close yang sama dengan sinyal,
+     identik dengan definisi rezim di Tahap A2 (§15). Data BTC tidak mencakup close itu → UNAVAILABLE (tanpa tebakan). */
+  function btcRegime(analyses,rec){
+    if(!rec||rec.symbol==='BTCUSDT')return null;
+    const a=analyses&&analyses.get('BTCUSDT'),T=Date.parse(rec.decision_available_utc);
+    const i=a&&Number.isFinite(T)?a.idxOf.get(T-H4):undefined;
+    if(i===undefined)return {code:'UNAVAILABLE',label:null};
+    const label=a.m1At(i).structure.label;
+    if(label==='INCOMPLETE')return {code:'UNAVAILABLE',label};
+    if(label==='TRANSITION')return {code:'BTC_TRANSITION',label};
+    const aligned=(rec.side==='LONG'&&label==='BULLISH')||(rec.side==='SHORT'&&label==='BEARISH');
+    return {code:aligned?'ALIGNED':'OPPOSED',label};
+  }
+
+  return {KLINE_LIMIT,BOARD_LOOKBACK,toCandle,lastClosedT,outcome,buildState,auditLines,publicRecord,btcRegime};
 });

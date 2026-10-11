@@ -4,7 +4,7 @@
    Open Interest, WebSocket ticker, aggTrade (CVD) dan depth20 (orderbook).
    Keluar 0 = lulus, 1 = gagal, 3 = Binance menolak lokasi server (HTTP 451/403 geo) sehingga uji tidak bisa dijalankan. */
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
-const C=require('../engine/core'),M2=require('../engine/m2'),Cy=require('../app/cycle'),Tr=require('../app/transport'),Lv=require('../app/live');
+const C=require('../engine/core'),M2=require('../engine/m2'),Cy=require('../app/cycle'),Tr=require('../app/transport'),Lv=require('../app/live'),X=require('../app/exec');
 const ROOT=path.resolve(__dirname,'..');
 const FROZEN=M2.frozenFrom(JSON.parse(fs.readFileSync(path.join(ROOT,'evidence/frozen_cdf_normalization.json'),'utf8')),JSON.parse(fs.readFileSync(path.join(ROOT,'evidence/frozen_v2_normalizations.json'),'utf8')));
 const gh=process.env.GITHUB_ACTIONS==='true';
@@ -63,6 +63,15 @@ async function engineStep(raw,now){
   });
   await engineStep(raw,tr.serverNow());
   await step('REST /fapi/v1/openInterest × 6 pair',async()=>{const o=[];for(const s of C.PAIRS){const v=await tr.openInterest(s);assert(v>0,s+' OI '+v);o.push(s+' '+v);}return o.join(', ');});
+  await step('REST /fapi/v1/exchangeInfo (R32): aturan tick/step/min notional 6 pair terbaca, rencana contoh siap salin',async()=>{
+    const rules=X.parseRules(await tr.exchangeInfo(),C.PAIRS);
+    assert.deepEqual(Object.keys(rules).sort(),[...C.PAIRS].sort(),'pair tanpa aturan: '+C.PAIRS.filter(s=>!rules[s]).join(','));
+    const o=[];
+    for(const s of C.PAIRS){const r=rules[s],last=raw[s][raw[s].length-1].close;assert.equal(r.status,'TRADING',s);
+      const pl=X.plan({symbol:s,side:'LONG',entry:last,stop:last*0.98,target:last*1.04},{capital:'100000',riskPct:'0.5',costBps:'18'},r);
+      assert.equal(pl.status,'READY',s+' '+pl.status+' '+pl.reasons.join());o.push(s+' tick '+r.tickSize+' step '+r.stepSize+' min '+r.minNotional);}
+    return o.join(', ');
+  });
   await step('WebSocket ticker 6 pair (/market/stream …@ticker): harga live konsisten dengan kline',async()=>{
     assert(typeof WebSocket==='function','Node tanpa WebSocket global');
     const tk=Tr.createTicker({symbols:C.PAIRS,onTick:()=>{}});

@@ -1,7 +1,7 @@
 /* Malomo V7 — service worker PWA: cache app shell saja. Data Binance (lintas origin) tidak pernah di-cache di sini,
    supaya keputusan selalu dari candle terbaru. CACHE_NAME diganti tiap build (scripts/build-site.js). */
 const CACHE_NAME='malomo-v7-__BUILD__';
-const SHELL=['./','index.html','styles.css','labels.js','cycle.js','transport.js','live.js','ui.js','main.js','manifest.webmanifest','icon.svg','icon-192.png','icon-512.png',
+const SHELL=['./','index.html','styles.css','labels.js','cycle.js','transport.js','live.js','exec.js','ui.js','main.js','manifest.webmanifest','icon.svg','icon-192.png','icon-512.png',
   'engine/core.js','engine/m1.js','engine/generators.js','engine/m2.js','engine/m3m4.js','engine/pipeline.js',
   'data/frozen_cdf_normalization.json','data/frozen_v2_normalizations.json','data/MANIFEST_SHA256.json','build-info.json'];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(SHELL)).then(()=>self.skipWaiting()));});

@@ -200,6 +200,13 @@ test('Transport: antrean 200 ms, cooldown 429 memakai Retry-After, error HTTP di
   for(const p of ['/fapi/v1/order?symbol=BTCUSDT','/fapi/v2/account','/fapi/v1/listenKey','/fapi/v1/klines'])await assert.rejects(tr.request(p),/tidak diizinkan/);
   assert.equal(calls.length,3);
 });
+test('Transport: exchangeInfo (R32) publik diizinkan persis; varian path lain ditolak sebelum jaringan',async()=>{
+  const ck=fakeClock(),calls=[];
+  const tr=Tr.createTransport({now:ck.now,sleep:ck.sleep,fetchImpl:async u=>{calls.push(u);return res(200,{symbols:[]});}});
+  assert.deepEqual(await tr.exchangeInfo(),{symbols:[]});assert.equal(calls[0],Tr.REST+'/fapi/v1/exchangeInfo');
+  for(const p of ['/fapi/v1/exchangeInfo?symbol=BTCUSDT','/fapi/v2/exchangeInfo','/fapi/v1/leverageBracket'])await assert.rejects(tr.request(p),/tidak diizinkan/);
+  assert.equal(calls.length,1);
+});
 test('Transport: sinkron jam server; cache kline sampai candle berjalan close; tanpa candle berjalan → tidak di-cache',async()=>{
   const ck=fakeClock();let n=0,serverOffset=7000;const t0=Math.floor((ck.now()+serverOffset)/H4)*H4;
   const rows=withForming=>[[t0-H4,1,1,1,1,1,t0-1],...(withForming?[[t0,1,1,1,1,1,t0+H4-1]]:[])];
@@ -249,7 +256,7 @@ test('Live posisi: CVD taker (m=true → jual), orderbook imbalance, jendela CVD
 });
 
 // ---------- pemindaian statis ----------
-const SRC=['app/index.html','app/main.js','app/ui.js','app/cycle.js','app/transport.js','app/live.js','app/labels.js','app/sw.js',...fs.readdirSync(path.join(ROOT,'engine')).map(f=>'engine/'+f)];
+const SRC=['app/index.html','app/main.js','app/ui.js','app/cycle.js','app/transport.js','app/live.js','app/labels.js','app/exec.js','app/sw.js',...fs.readdirSync(path.join(ROOT,'engine')).map(f=>'engine/'+f)];
 const read=f=>fs.readFileSync(path.join(ROOT,f),'utf8');
 test('Statis: tanpa endpoint order/akun, tanpa API key/signature, hanya REST publik + WebSocket pasar',()=>{
   for(const f of SRC){const s=read(f);
@@ -259,7 +266,7 @@ test('Statis: tanpa endpoint order/akun, tanpa API key/signature, hanya REST pub
   assert.deepEqual([...hosts].filter(h=>!['fapi.binance.com','fstream.binance.com','fonts.googleapis.com','fonts.gstatic.com'].includes(h)),[]);
 });
 test('Statis UI §1: M6 tidak diklaim win rate/akurasi/peluang; tanpa ambang M6; tanpa tombol order',()=>{
-  for(const f of ['app/index.html','app/ui.js','app/main.js','app/labels.js']){const s=read(f);
+  for(const f of ['app/index.html','app/ui.js','app/main.js','app/labels.js','app/exec.js']){const s=read(f);
     for(const m of s.matchAll(/win rate/gi)){const ctx=s.slice(Math.max(0,m.index-12),m.index);assert(/bukan\s*$/i.test(ctx)||/not_?$/i.test(ctx),f+': "win rate" tanpa "bukan"');}
     assert(!/akurasi|probabilitas profit|sinyal pasti|peluang menang\b(?!.*bukan)/i.test(s.replace(/bukan peluang menang/gi,'')),f+' memuat klaim terlarang');
     assert(!/\b(350|375|400)\b.*M6|M6.*\b(350|375|400)\b/.test(s),f+' memuat ambang M6');

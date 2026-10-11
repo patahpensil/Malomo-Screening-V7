@@ -4,7 +4,7 @@
    arah = teks + ikon; tanpa ambang M6; waktu UTC + WITA; versi selalu terlihat. */
 (function(root){
   'use strict';
-  const M=root.Malomo,L=M.labels,C=M.core;
+  const M=root.Malomo,L=M.labels,C=M.core,X=M.exec;
   const e=L.esc;
   const fin=x=>typeof x==='number'&&Number.isFinite(x);
   const recId=r=>r.symbol+'|'+r.side+'|'+r.signal_family+'|'+r.decision_available_utc;
@@ -17,6 +17,49 @@
   const fam=f=>`<span title="${e(f)}">${e(L.FAMILY[f]||f)}</span>`;
   function bar(v,max){if(!fin(v))return '<div class="bar null" title="null — bukan 0"></div>';return `<div class="bar"><i style="width:${Math.max(0,Math.min(100,100*v/max))}%"></i></div>`;}
   const scoreTxt=(v,max)=>`${L.score(v)} / ${max}`;
+
+  // ---------- R33 label rezim BTC (informatif, bukan gate) ----------
+  const RG={ALIGNED:['Searah BTC','primary'],OPPOSED:['Berlawanan dengan BTC','warn'],BTC_TRANSITION:['BTC transisi','neutral'],UNAVAILABLE:['Rezim BTC: —','neutral']};
+  const regimeOf=(state,r)=>state&&state.analyses?M.cycle.btcRegime(state.analyses,r):null;
+  function regimeChip(rg){
+    if(!rg)return '';const [t,tone]=RG[rg.code]||RG.UNAVAILABLE;
+    return `<span class="chip ${tone} rg" data-regime="${e(rg.code)}" title="Informasi saja, bukan gate. Struktur M1 BTC: ${e(L.STRUCT[rg.label]||'—')}">${e(t)}</span>`;
+  }
+  const REGIME_NOTE='Informasi saja. Backtest 2024–2026: sinyal searah BTC rata-rata lebih baik di ketiga tahun, tetapi belum signifikan secara statistik. Altcoin bisa bergerak sendiri.';
+
+  // ---------- R32 rencana eksekusi siap salin ----------
+  const usdt=v=>fin(v)?v.toFixed(2)+' USDT':'—';
+  const ERR={EMPTY:'wajib diisi',INVALID:'tidak valid'};
+  function execForm(ex){
+    const st=ex.settings||{},v=X.validateSettings(st),errs=v.errors||{};
+    const rs=ex.rulesAt?`dimuat ${L.time(ex.rulesAt)}`:ex.rulesError?'gagal dimuat — rencana tampil belum dibulatkan':'memuat…';
+    const field=(k,label,ph,hint)=>`<label class="exf${errs[k]?' bad':''}"><span>${e(label)}</span><input data-exec="${k}" inputmode="decimal" autocomplete="off" value="${e(st[k]??'')}" placeholder="${e(ph)}"><small>${errs[k]?e(ERR[errs[k]]||'tidak valid')+' · ':''}${e(hint)}</small></label>`;
+    return `<div class="exec-form" data-exec-form><div class="section-head" style="margin:0 0 6px"><h3>Pengaturan rencana siap salin</h3><span class="muted small">Tersimpan hanya di browser ini</span></div>
+      <div class="exf-grid">${field('capital','Modal alokasi (USDT)','mis. 1000','wajib, > 0')}${field('riskPct','Risiko per trade (%)','0.5','0,5 – 1')}${field('costBps','Biaya round-trip (bps)','18','0 – 50')}</div>
+      <div class="muted small" style="margin-top:6px">Aturan pair Binance (tick/step/min notional): ${e(rs)} · Leverage tidak diisi: dihitung otomatis per sinyal.</div></div>`;
+  }
+  const copyBtn=(val,label)=>`<button class="btn copy" data-action="copy-val" data-val="${e(val)}" aria-label="Salin ${e(label)}">Salin</button>`;
+  function execPanel(input,ex){
+    if(!ex)return '';
+    const rules=ex.rules&&ex.rules[input.symbol]||null,pl=X.plan(input,ex.settings,rules);
+    const tone=pl.status==='READY'?'primary':pl.status==='UNROUNDED'||pl.status==='NEED_SETTINGS'?'warn':'reject';
+    let h=`<div class="exec" data-exec-status="${e(pl.status)}"><div class="exec-head"><b>Rencana siap salin</b><span class="chip ${tone}">${e(X.STATUS_TEXT[pl.status]||pl.status)}</span></div>`;
+    if(pl.status==='NEED_SETTINGS'||pl.status==='INVALID_SETTINGS'||pl.status==='NO_PLAN'){
+      return h+`<div class="muted small">${pl.status==='NO_PLAN'?'Menunggu open candle berikutnya.':'Isi pengaturan (modal, risiko, biaya) di layar Portofolio atau tab Rencana.'}</div></div>`;
+    }
+    const rd=pl.rounded,ps=pl.priceStr;
+    const cell=(k,lab,str,num)=>`<div class="exv"><span>${e(lab)}</span><b class="mono" data-exv="${k}">${e(rd&&str?str:L.price(num))}</b>${rd&&str&&pl.status!=='PAIR_NOT_TRADING'?copyBtn(str,lab):''}</div>`;
+    h+=`<div class="exv-grid">${cell('entry','Entry limit',ps&&ps.entry,pl.entry)}${cell('stop','SL',ps&&ps.stop,pl.stop)}${cell('target','TP',ps&&ps.target,pl.target)}${cell('qty','Qty',pl.qtyStr,pl.qty)}</div>`;
+    if(pl.reasons.length)h+=`<div class="warnbox" style="margin-top:8px">⚠ ${e(pl.reasons.map(x=>X.REASON_TEXT[x]||x).join(' · '))}</div>`;
+    h+=`<dl class="kv exk"><dt>Leverage maks aman (perkiraan)</dt><dd data-exv="lev"><b>${e(String(pl.leverage))}×</b></dd>
+      <dt>Margin pada ${e(String(pl.leverage))}×</dt><dd>${e(usdt(pl.margin))} · notional ${e(usdt(pl.notional))}</dd>
+      <dt>Rugi bila SL kena</dt><dd data-exv="loss">${e(usdt(pl.lossAtStop))} (${e(L.pct(pl.lossPctCapital))} modal, termasuk biaya)</dd>
+      <dt>Untung bila TP kena</dt><dd>${e(usdt(pl.gainAtTarget))} setelah biaya · RR 1:${e(pl.rr.toFixed(2))}</dd>
+      <dt>Jarak SL · likuidasi (perkiraan)</dt><dd>${e(pl.stopPct.toFixed(2))}% · ±${e(pl.liqPct.toFixed(2))}% (≈ ${e(L.price(pl.liqPrice))}, MMR asumsi ${e((pl.mmr*100).toFixed(1))}%)</dd></dl>`;
+    h+=`<div class="note">${rd?'':'Angka mentah, belum kelipatan tick — jangan disalin sebagai order. '}Set leverage di Binance ≤ ${e(String(pl.leverage))}×. Pasang limit order; bila tidak terisi, lewati — jangan kejar dengan market order. Rencana ini tidak mengirim order.</div></div>`;
+    return h;
+  }
+  const recInput=r=>({symbol:r.symbol,side:r.side,entry:r.entry_reference_open,stop:r.stop_price,target:r.target_price});
 
   // ---------- bar siklus ----------
   const STEPS=[['ingest','Ingest'],['valid','Validasi'],['ind','Indikator'],['m1','M1'],['gen','Generator M2'],['canon','Kanonisasi'],['m2','Skor M2'],
@@ -55,34 +98,36 @@
       const top=topReason(recs);
       html+=`<div class="section empty" data-empty="no-entry"><b>Tidak ada kandidat layak di close ${e(L.hm(cy.T))} UTC</b><br>${recs.length?'Alasan terbanyak: '+e(top):'Tidak ada event terkonfirmasi pada close ini.'}</div>`;
     }
-    if(recs.length)html+=candidateTable(recs,view);
+    if(recs.length)html+=candidateTable(recs,view,state);
     return html;
   }
   function topReason(recs){
     const n={};for(const r of recs)for(const x of (r.reasons.length?r.reasons:[r.status]))n[x]=(n[x]||0)+1;
     const k=Object.keys(n).sort((a,b)=>n[b]-n[a])[0];return k?L.reasonLabel(k)+' ('+n[k]+')':'—';
   }
-  function filterRecs(recs,f){return recs.filter(r=>(!f.pair||r.symbol===f.pair)&&(!f.side||r.side===f.side)&&(!f.family||r.signal_family===f.family)&&(!f.status||r.status===f.status));}
-  function candidateTable(recs,view){
+  // Filter tampilan. f.btc==='ALIGNED' → hanya sinyal searah BTC (R33: menyaring tampilan saja, bukan keputusan).
+  function filterRecs(recs,f,rgOf=()=>null){return recs.filter(r=>(!f.pair||r.symbol===f.pair)&&(!f.side||r.side===f.side)&&(!f.family||r.signal_family===f.family)&&(!f.status||r.status===f.status)
+    &&(!f.btc||((rgOf(r)||{}).code===f.btc)));}
+  function candidateTable(recs,view,state){
     const f=view.filters,opts=(name,vals,lab)=>`<label>${name}<select data-filter="${name.toLowerCase()}"><option value="">Semua</option>${vals.map(v=>`<option value="${e(v)}"${f[key(name)]===v?' selected':''}>${e(lab?lab[v]||v:v)}</option>`).join('')}</select></label>`;
-    const key=n=>({Pair:'pair',Arah:'side',Keluarga:'family',Status:'status'}[n]);
+    const key=n=>({Pair:'pair',Arah:'side',Keluarga:'family',Status:'status',BTC:'btc'}[n]);
     const uniq=k=>[...new Set(recs.map(r=>r[k]))].sort();
-    const rows=filterRecs(recs,f);
+    const rgOf=r=>regimeOf(state,r),rows=filterRecs(recs,f,rgOf);
     let html=`<div class="section"><div class="section-head"><h3>Kandidat close ini</h3><span class="muted small">Urutan = tie-break PRD §8.1.5 (M6↓, M2 kualitas↓, M1↓, simbol, LONG dulu, keluarga)</span></div>
-      <div class="filters">${opts('Pair',uniq('symbol'))}${opts('Arah',['LONG','SHORT'])}${opts('Keluarga',uniq('signal_family'),L.FAMILY)}${opts('Status',uniq('status'),L.STATUS)}</div>`;
-    html+=`<div class="table-wrap cand-table"><table><thead><tr><th class="num">#</th><th>Pair</th><th>Arah</th><th>Keluarga</th><th>M6 (indeks)</th><th class="num" title="Pembeda utama antar kandidat, hanya tampilan">M1 + M2q</th><th>Status</th><th>Alasan</th><th>Waktu</th></tr></thead><tbody>`;
+      <div class="filters">${opts('Pair',uniq('symbol'))}${opts('Arah',['LONG','SHORT'])}${opts('Keluarga',uniq('signal_family'),L.FAMILY)}${opts('Status',uniq('status'),L.STATUS)}<label>BTC<select data-filter="btc"><option value="">Semua</option><option value="ALIGNED"${f.btc==='ALIGNED'?' selected':''}>Searah BTC saja</option></select></label></div>`;
+    html+=`<div class="table-wrap cand-table"><table><thead><tr><th class="num">#</th><th>Pair</th><th>Arah</th><th>Keluarga</th><th>M6 (indeks)</th><th class="num" title="Pembeda utama antar kandidat, hanya tampilan">M1 + M2q</th><th>Status</th><th title="Informasi saja, bukan gate">Rezim BTC</th><th>Alasan</th><th>Waktu</th></tr></thead><tbody>`;
     for(const r of rows){
       const sel=view.selected===recId(r)?' sel':'',m6=r.scores.m6_confluense_500;
       html+=`<tr class="row${sel}" data-rec="${e(recId(r))}"><td class="num">${r.rank_provisional??'—'}</td><td>${e(r.symbol)}</td><td>${side(r.side)}</td><td>${fam(r.signal_family)}</td>
         <td><div class="m6cell">${bar(m6,500)}<span class="mono">${fin(m6)?e(L.score(m6))+' / 500':'— / 500'}</span></div></td>
         <td class="num">${fin(r.scores.m1_plus_m2q_0_180_display_only)?e(L.score(r.scores.m1_plus_m2q_0_180_display_only))+' / 180':'—'}</td>
-        <td>${chip(r.status,L.STATUS)}</td><td>${reasonChips(r.reasons)}</td><td class="small">${e(L.time(ms(r.confirmation_utc)))}</td></tr>`;
+        <td>${chip(r.status,L.STATUS)}</td><td>${regimeChip(rgOf(r))||'<span class="muted small">—</span>'}</td><td>${reasonChips(r.reasons)}</td><td class="small">${e(L.time(ms(r.confirmation_utc)))}</td></tr>`;
     }
     html+='</tbody></table></div><div class="cand-cards">';
     for(const r of rows){const m6=r.scores.m6_confluense_500;
       html+=`<div class="cand-card" data-rec="${e(recId(r))}"><div class="top"><b>${e(r.symbol)}</b>${side(r.side)}</div>
         <div class="m6cell">${bar(m6,500)}<span class="mono">${fin(m6)?e(L.score(m6))+' / 500':'— / 500'}</span></div>
-        <div class="chips">${chip(r.status,L.STATUS)}<span class="chip neutral">${e(L.FAMILY[r.signal_family]||r.signal_family)}</span></div>${reasonChips(r.reasons)}</div>`;}
+        <div class="chips">${chip(r.status,L.STATUS)}<span class="chip neutral">${e(L.FAMILY[r.signal_family]||r.signal_family)}</span>${regimeChip(rgOf(r))}</div>${reasonChips(r.reasons)}</div>`;}
     html+='</div>';
     if(!rows.length)html+='<div class="empty">Tidak ada kandidat untuk filter ini.</div>';
     return html+'</div>';
@@ -97,14 +142,14 @@
     if(/HIGH_ABOVE/.test(inv.rule))return `Kedalaman > 0.85 (high > ${L.price(inv.price)}) atau high di atas asal impuls ${L.price(inv.level)}`;
     return e(inv.rule);
   }
-  function inspector(rec,state,view){
+  function inspector(rec,state,view,ex){
     if(!rec)return '';
     const tab=view.tab||'skor';
     const head=`<div class="insp-head"><div><div class="insp-title">${e(rec.symbol)} ${side(rec.side)} · ${fam(rec.signal_family)}</div>
-      <div class="muted small">${e(L.EVENT[rec.event_status]||rec.event_status)} ${e(L.time(ms(rec.confirmation_utc)))} · ${e(L.date(ms(rec.confirmation_utc)))}</div></div>
+      <div class="muted small">${e(L.EVENT[rec.event_status]||rec.event_status)} ${e(L.time(ms(rec.confirmation_utc)))} · ${e(L.date(ms(rec.confirmation_utc)))}</div>${(()=>{const rg=regimeOf(state,rec);return rg?`<div class="chips" style="margin-top:4px">${regimeChip(rg)}<span class="muted small">${e(REGIME_NOTE)}</span></div>`:'';})()}</div>
       <button class="close-x" data-action="close-insp" aria-label="Tutup inspektor">✕</button></div>
       <div class="tabs" role="tablist">${[['skor','Skor'],['rencana','Rencana'],['audit','Audit'],['json','JSON']].map(([k,n])=>`<button role="tab" data-tab="${k}" class="${tab===k?'on':''}" aria-selected="${tab===k}">${n}</button>`).join('')}</div>`;
-    const body=tab==='rencana'?planTab(rec):tab==='audit'?auditTab(rec,state):tab==='json'?jsonTab(rec):scoreTab(rec);
+    const body=tab==='rencana'?planTab(rec,ex):tab==='audit'?auditTab(rec,state):tab==='json'?jsonTab(rec):scoreTab(rec);
     const v=`<div class="versions">score_version ${e(rec.score_version)}<br>normalization_version ${e(rec.normalization_version??'null')}${rec.calibration_policy?' · '+e(rec.calibration_policy):''}<br>risk_mandate_version ${e(rec.risk_mandate_version)}<br>m5_snapshot ${e(rec.m5_snapshot)} · ${e(rec.m5_scope||'')}</div>`;
     return head+body+v;
   }
@@ -133,7 +178,7 @@
     h+=`<div class="note" style="margin-top:12px">Skor ini indeks desain riset. M1 dan M2 bisa berbagi informasi harga; M2 integritas dan M5 sama-sama audit proses. Bukan lima bukti independen (PRD §8.3).</div>`;
     return h;
   }
-  function planTab(r){
+  function planTab(r,ex){
     if(!fin(r.entry_reference_open))return `<div class="empty">Menunggu open candle berikutnya.<br><span class="small">Rencana dihitung pada fase ENTRY_REVIEW saat open(t+1) diketahui.</span></div>
       <dl class="kv" style="margin-top:12px"><dt>Invalidasi</dt><dd>${invalidationText(r.invalidation)}</dd><dt>ATR frozen (sebelum break)</dt><dd>${e(L.price(r.atr_frozen))}</dd></dl>`;
     const release=ms(r.entry_reference_time_utc)+r.max_holding_hours*3600000;
@@ -142,7 +187,8 @@
       <dt>Risiko</dt><dd>${e(L.pct(r.risk_pct))} dari ekuitas acuan</dd><dt>Gross</dt><dd>${e(L.pct(r.gross_pct))} dari ekuitas acuan</dd>
       <dt>Invalidasi</dt><dd>${invalidationText(r.invalidation)}</dd><dt>Batas waktu</dt><dd>slot lepas ${e(L.dateTime(release))} (24 jam tetap)</dd>
       <dt>ATR entry (candle konfirmasi)</dt><dd>${e(L.price(r.atr_entry))}</dd><dt>ATR frozen (sebelum break)</dt><dd>${e(L.price(r.atr_frozen))}</dd></dl>
-      <div class="warnbox" style="margin-top:12px">Harga belum dikuantisasi ke tick size Binance. Bukan harga order.</div>`;
+      <div class="warnbox" style="margin-top:12px">Angka riset PRD (ekuitas acuan, float64, belum kelipatan tick) — bukan harga order.${r.status==='ENTRY_CONSIDER'?' Pakai Rencana siap salin di bawah.':''}</div>
+      ${r.status==='ENTRY_CONSIDER'&&ex?`<div style="margin-top:12px">${execForm(ex)}${execPanel(recInput(r),ex)}</div>`:''}`;
   }
   function auditTab(r,state){
     const key=r.symbol+'|4h|'+r.decision_available_utc,log=state?state.log.find(x=>x.type==='CONFLICT_CHECK'&&x.key===key):null;
@@ -187,7 +233,7 @@
   }
 
   // ---------- S4 Portofolio Simulasi (kartu Decision) ----------
-  function decisionCard(p,live,now){
+  function decisionCard(p,live,now,ex,rg){
     const long=p.side==='LONG',tick=live.prices[p.symbol],px=tick?tick.price:NaN,d=live.data(p.symbol),risk=Math.abs(p.entry-p.stop);
     const R=px>0&&risk>0?(long?px-p.entry:p.entry-px)/risk:null;
     const lo=Math.min(p.stop,p.target),hi=Math.max(p.stop,p.target),frac=v=>Math.max(0,Math.min(1,(v-lo)/(hi-lo)))*100;
@@ -202,28 +248,30 @@
     const inv=p.invalidation,invWarn=inv&&px>0&&(inv.rule.startsWith('CLOSE_BELOW')?px<inv.price:inv.rule.startsWith('CLOSE_ABOVE')?px>inv.price:false);
     const o=p.outcome,oTxt=o.code==='OPEN'?`Outcome riset: berjalan (${o.candlesSeen} dari ${o.of} candle 4H)`:`Outcome riset: ${L.OUTCOME[o.code]} ${L.time(o.atMs)}${fin(o.r)?' ('+(o.r>=0?'+':'')+o.r.toFixed(2)+'R)':''} — slot tetap terisi sampai 24 jam`;
     return `<div class="dec-card ${e(p.side)}" data-rec="${e(recId(p.record))}" data-pos="${e(p.id)}">
-      <div class="dec-head"><span class="run-tag"><span class="run-dot"></span>RUNNING</span><span class="dec-sym">${e(p.symbol.replace(/USDT$/,''))}</span>${side(p.side)}<span class="chip neutral">${e(L.FAMILY[p.family]||p.family)}</span>
+      <div class="dec-head"><span class="run-tag"><span class="run-dot"></span>RUNNING</span><span class="dec-sym">${e(p.symbol.replace(/USDT$/,''))}</span>${side(p.side)}<span class="chip neutral">${e(L.FAMILY[p.family]||p.family)}</span>${regimeChip(rg)}
         <div class="dec-meta">masuk ${e(L.time(p.entryMs))} · berjalan ${e(L.durationShort(now-p.entryMs))} · M6 ${e(L.score(p.m6))} / 500 (indeks)</div></div>
       <div class="dec-price"><span class="px">${px>0?e(L.price(px)):'—'}</span><span class="rr ${fin(R)&&R>=0?'pos':'neg'}">${fin(R)?(R>=0?'+':'')+R.toFixed(2)+'R':'—'}</span></div>
       <div class="dec-prog" title="Stop → Entry → Target"><div class="fill" style="width:${px>0?fromStop(px):0}%"></div><div class="mark" style="left:${fromStop(p.entry)}%"></div>${px>0?`<div class="now" style="left:${fromStop(px)}%"></div>`:''}</div>
       <div class="dec-lv"><div><span>SL</span>${e(L.price(p.stop))}</div><div><span>ENTRY</span>${e(L.price(p.entry))}</div><div><span>TP (2R)</span>${e(L.price(p.target))}</div><div><span>RR</span>1:${(Math.abs(p.target-p.entry)/risk).toFixed(2)}</div></div>
       <div class="dec-outcome ${o.code==='STOP_HIT'?'neg':o.code==='TARGET_HIT'?'pos':'muted'}">${e(oTxt)}</div>
+      ${execPanel({symbol:p.symbol,side:p.side,entry:p.entry,stop:p.stop,target:p.target},ex)}
       <div class="dec-data"><div class="dec-cell"><div class="lbl">OPEN INTEREST</div>${oi}</div><div class="dec-cell"><div class="lbl">CVD (TAKER)</div>${cvd}</div><div class="dec-cell"><div class="lbl">ORDERBOOK</div>${ob}</div>
         <div class="dec-cell"><div class="lbl">SLOT 24 JAM · INVALIDASI</div><div class="val">lepas dalam ${e(L.durationShort(p.slotReleaseMs-now))}</div><div class="sub ${invWarn?'dec-warn':''}">${inv?e(invShort(inv)):'—'}${invWarn?'<br>⚠ harga sudah melewati level invalidasi':''}</div></div></div>
       <div class="muted small" style="margin-top:8px">OI · CVD · orderbook hanya tampilan, tidak masuk skor (PRD §4.5).</div></div>`;
   }
   const invShort=inv=>inv.rule==='CLOSE_BELOW_LEVEL_MINUS_R'?'Invalidasi: close < '+L.price(inv.price):inv.rule==='CLOSE_ABOVE_LEVEL_PLUS_R'?'Invalidasi: close > '+L.price(inv.price):'Invalidasi: kedalaman > 0.85 ('+L.price(inv.price)+')';
-  function slots(state,live,now){
+  function slots(state,live,now,ex){
     const act=state.book.active,out=[];
-    for(let i=0;i<state.book.maxPositions;i++)out.push(act[i]?decisionCard(act[i],live,now):'<div class="slot-empty">Slot kosong — kapasitas maksimum, bukan target</div>');
+    for(let i=0;i<state.book.maxPositions;i++)out.push(act[i]?decisionCard(act[i],live,now,ex,regimeOf(state,act[i].record)):'<div class="slot-empty">Slot kosong — kapasitas maksimum, bukan target</div>');
     return out.join('');
   }
-  function portofolio(state,live,now){
+  function portofolio(state,live,now,ex){
     if(!state)return '<div class="empty">Memuat…</div>';
     const b=state.book,meter=(name,v,max,tip)=>`<div class="card meter" title="${e(tip||'')}"><div class="section-head" style="margin:0"><span>${e(name)}</span><span class="mono">${e(L.pct(v))} / ${e(L.pct(max))}</span></div><div class="track"><i style="width:${Math.min(100,100*v/max)}%"></i></div></div>`;
     const rc=Object.entries(b.rejectionCounts);
     return `<div class="section-head"><h2>Portofolio Simulasi</h2><span class="muted small">${b.active.length} dari ${b.maxPositions} slot terisi</span></div>
-      <div class="slots" id="slots">${slots(state,live,now)}</div>
+      ${ex?execForm(ex):''}
+      <div class="slots" id="slots">${slots(state,live,now,ex)}</div>
       <div class="meters">${meter('Risiko terbuka',b.openRiskPct,b.riskOpenMaxPct)}${meter('Gross notional',b.grossPct,b.grossMaxPct,'Batas gross umumnya tercapai sebelum batas 3 slot')}</div>
       <div class="note">Ekuitas acuan ${b.equity} unit, tanpa kompaun. Slot terisi 24 jam penuh; stop/target hanya mencatat hasil (PRD §6). Portofolio direplay dari candle pertama yang diunduh (${e(L.date(b.replayFromMs))}); tidak dicampur dengan akun Binance asli.</div>
       <div class="section" style="margin-top:16px"><div class="section-head"><h3>Log penolakan risiko</h3><span class="chips">${rc.map(([k,v])=>`<span class="chip reject" title="${e(k)}">${e(L.reasonLabel(k))}: ${v}</span>`).join('')||'<span class="muted small">Belum ada</span>'}</span></div>
@@ -289,5 +337,5 @@
     return h;
   }
 
-  root.Malomo.ui={recId,stepper,health,siklus,inspector,board,portofolio,slots,pasar,audit,decisionCard,invalidationText,filterRecs};
+  root.Malomo.ui={recId,stepper,health,siklus,inspector,board,portofolio,slots,pasar,audit,decisionCard,invalidationText,filterRecs,execPanel,execForm,regimeChip};
 })(globalThis);
