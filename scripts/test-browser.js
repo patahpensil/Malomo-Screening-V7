@@ -101,7 +101,7 @@ const nav=async(page,viewport,screen)=>{await page.locator((viewport.width<768?'
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
   const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||(fs.existsSync('/opt/pw-browsers/chromium')?undefined:undefined),args:['--no-sandbox']});
   let pass=0;const fails=[];
-  const run=async(name,fn)=>{try{await fn();pass++;console.log('PASS '+name);}catch(e){fails.push(name);console.log('FAIL '+name+' — '+String(e.message).split('\n')[0]);}};
+  const run=async(name,fn)=>{try{await fn();pass++;console.log('PASS '+name);}catch(e){const msg=String(e.message).split('\n')[0];fails.push(name+' — '+msg);console.log('FAIL '+name+' — '+msg);}};
   const recsT=expect.cycle.records;
   try{
     for(const viewport of [{width:1440,height:1000},{width:390,height:844}]){
@@ -292,5 +292,6 @@ const nav=async(page,viewport,screen)=>{await page.locator((viewport.width<768?'
     });
   }finally{await browser.close();server.close();}
   console.log(`\n${pass} PASS, ${fails.length} FAIL`);
+  if(process.env.GITHUB_ACTIONS==='true')for(const f of fails)console.log('::error::Uji browser gagal: '+f.slice(0,300));
   process.exit(fails.length?1:0);
 })();
