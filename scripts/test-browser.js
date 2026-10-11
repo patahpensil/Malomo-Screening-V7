@@ -251,7 +251,7 @@ const nav=async(page,viewport,screen)=>{await page.locator((viewport.width<768?'
       await page.waitForSelector('.warnbox');
       assert.equal(Number(await page.locator('[data-count="ENTRY_CONSIDER"] .v').innerText()),0);
       assert((await page.locator('#stepper').innerText()).includes('FETCH_FAILED'));
-      await page.locator('[data-screen="audit"]').first().click();assert((await page.locator('main').innerText()).includes('Gagal ambil data'));
+      await page.locator('[data-screen="audit"]').first().click();await page.waitForSelector('[data-action="download-audit"]');assert((await page.locator('main').innerText()).includes('Gagal ambil data'));
       assert.deepEqual(errors,[]);await context.close();
     });
     await run('exchangeInfo gagal → rencana tampil "belum dibulatkan", tanpa tombol salin',async()=>{
@@ -262,7 +262,7 @@ const nav=async(page,viewport,screen)=>{await page.locator((viewport.width<768?'
       await page.waitForSelector('#slots .exec[data-exec-status="UNROUNDED"]',{timeout:120000});
       await page.locator('[data-screen="siklus"]').first().click();await page.waitForSelector('[data-count="ENTRY_CONSIDER"]');
       assert((await page.locator('main').innerText()).includes('Universe 100 pair belum bisa ditetapkan'),'peringatan universe');
-      await page.locator('[data-screen="portofolio"]').first().click();
+      await page.locator('[data-screen="portofolio"]').first().click();await page.waitForSelector('#slots .exec[data-exec-status="UNROUNDED"]');
       assert.equal(await page.locator('#slots .exec [data-action="copy-val"]').count(),0);
       const t=await page.locator('main').innerText();assert(t.includes('Belum dibulatkan')&&t.includes('jangan disalin sebagai order'));
       assert.deepEqual(errors,[]);await context.close();
