@@ -2,7 +2,7 @@ name: Tes & Deploy Malomo V7
 # Deploy ke GitHub Pages HANYA jika semua tes lulus: engine, paritas M2, aplikasi, verifier PRD, dan uji browser.
 on:
   push:
-    branches: [main]
+    branches: [main, 'uji-**']
   pull_request:
   workflow_dispatch:
 permissions:
@@ -25,14 +25,27 @@ jobs:
       - run: npm ci
       - name: Tes engine, paritas M2, aplikasi, verifier PRD
         run: npm test
-      - name: Paritas OHLCV 2024 (SKIP bila arsip belum ada)
+      - name: Unduh arsip kline resmi Binance 2024 (data.binance.vision, checksum resmi)
+        id: arsip
+        run: node scripts/fetch-ohlcv-2024.js || [ $? -eq 3 ]
+      - name: Paritas penuh engine vs bukti 2024 dari candle asli
+        if: ${{ !cancelled() }}
         run: npm run parity:ohlcv
+      - name: Uji data Binance asli (REST + WebSocket + siklus engine)
+        if: ${{ !cancelled() }}
+        run: node scripts/live-check.js || [ $? -eq 3 ]
       - name: Susun situs
+        if: ${{ !cancelled() }}
         run: npm run build
       - name: Pasang Chromium
+        if: ${{ !cancelled() }}
         run: npx playwright install --with-deps chromium
-      - name: Uji bug di browser (desktop + mobile, Binance di-mock)
+      - name: Uji bug di browser (desktop + mobile, skenario terkendali)
+        if: ${{ !cancelled() }}
         run: node scripts/test-browser.js
+      - name: Uji browser ujung-ke-ujung dengan data Binance asli
+        if: ${{ !cancelled() }}
+        run: node scripts/test-browser-live.js || [ $? -eq 3 ]
       - uses: actions/upload-pages-artifact@v3
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         with:

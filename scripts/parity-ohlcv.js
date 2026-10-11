@@ -11,6 +11,7 @@ const fs=require('node:fs'),path=require('node:path');
 const C=require('../engine/core'),M2=require('../engine/m2'),P=require('../engine/pipeline');
 const ROOT=path.resolve(__dirname,'..'),DIR=process.argv[2]||path.join(ROOT,'data','ohlcv-2024');
 const E=p=>path.join(ROOT,'evidence',p);
+const GH=process.env.GITHUB_ACTIONS==='true',say=(k,m)=>console.log(GH?`::${k}::${m}`:m);
 function csv(p){const [h,...rows]=fs.readFileSync(p,'utf8').trim().split(/\r?\n/);const k=h.split(',');return rows.map(r=>{const v=r.split(',');return Object.fromEntries(k.map((x,i)=>[x,v[i]]));});}
 function klines(p){
   return fs.readFileSync(p,'utf8').trim().split(/\r?\n/).filter(l=>/^\d/.test(l)).map(l=>{const v=l.split(',').map(Number);
@@ -31,9 +32,9 @@ for(const s of C.PAIRS){const a=P.analyzeSymbol(s,klines(path.join(DIR,s+'.csv')
 const want=new Map(ev772.map(r=>[FAM[r.signal_family]+'|'+r.pair+'|'+r.side+'|'+r.confirmation_available_utc,r]));
 const got=new Map(engine.map(x=>[x.key,x]));
 const miss=[...want.keys()].filter(k=>!got.has(k)),extra=[...got.keys()].filter(k=>!want.has(k));
-console.log(`Event CONFIRMED: engine ${got.size}, bukti ${want.size}, cocok ${[...want.keys()].filter(k=>got.has(k)).length}, hilang ${miss.length}, ekstra ${extra.length}`);
-if(miss.length)console.log('  contoh hilang: '+miss.slice(0,5).join('  '));
-if(extra.length)console.log('  contoh ekstra: '+extra.slice(0,5).join('  '));
+say('notice',`Event CONFIRMED: engine ${got.size}, bukti ${want.size}, cocok ${[...want.keys()].filter(k=>got.has(k)).length}, hilang ${miss.length}, ekstra ${extra.length}`);
+if(miss.length)say('warning','contoh hilang: '+miss.slice(0,5).join('  '));
+if(extra.length)say('warning','contoh ekstra: '+extra.slice(0,5).join('  '));
 // Skor kualitas kausal: riwayat prior-only dibangun dari event engine sendiri.
 const hist=engine.filter(x=>x.T<=trainEnd).map(x=>{const f=M2.features(x.a.c,x.ev.tc,x.ev.sideN);return {family:x.ev.family,t:x.T,raw:Object.assign({},f.raw,{rawT:x.ev.rawT,rawR:x.ev.rawR})};});
 const prov=M2.provider({frozen,trainEndMs:trainEnd,history:hist});
@@ -46,6 +47,6 @@ for(const [k,x] of got){
   const c=cmap.get(k);if(c){m1N++;const m=x.a.m1At(x.ev.tc);if(!(Math.abs((m.score??NaN)-Number(c.m1_100))<1e-6))m1Bad++;
     if(!(Math.abs(x.ev.generation.generation30-Number(c.signal_generation_30))<1e-9))gBad++;}
 }
-console.log(`Skor kualitas 80 kausal: ${qN-qBad}/${qN} cocok · M1 Breakout: ${m1N-m1Bad}/${m1N} · generation30 Breakout: ${m1N-gBad}/${m1N}`);
+say('notice',`Skor kualitas 80 kausal: ${qN-qBad}/${qN} cocok · M1 Breakout: ${m1N-m1Bad}/${m1N} · generation30 Breakout: ${m1N-gBad}/${m1N}`);
 const ok=!miss.length&&!extra.length&&!qBad&&!m1Bad&&!gBad;
-console.log(ok?'PARITAS PENUH: PASS':'PARITAS PENUH: FAIL');process.exit(ok?0:1);
+say(ok?'notice':'error',ok?'PARITAS PENUH: PASS':'PARITAS PENUH: FAIL');process.exit(ok?0:1);
