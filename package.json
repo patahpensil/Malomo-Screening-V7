@@ -2,7 +2,7 @@
   "name": "malomo-screening-v7",
   "version": "0.2.0",
   "private": true,
-  "description": "Malomo Screening V7 — riset M1–M6 Confluense (PRD v1.0.7), Binance USDⓈ-M Futures 4H",
+  "description": "Malomo Screening V7 — riset M1–M6 Confluense (PRD v1.0.8), Binance USDⓈ-M Futures 4H",
   "scripts": {
     "test": "node scripts/run-tests.js",
     "test:engine": "node scripts/test-engine.js && node scripts/test-parity-m2.js",

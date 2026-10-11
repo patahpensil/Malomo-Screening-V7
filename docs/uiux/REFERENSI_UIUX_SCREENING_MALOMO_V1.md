@@ -1,6 +1,6 @@
 # REFERENSI UI/UX — SCREENING MALOMO V1
 
-**Versi:** 1.0 · **Tanggal:** 10 Oktober 2026 · **Mengacu:** PRD FINAL M1–M6 CONFLUENSE v1.0.7
+**Versi:** 1.0 · **Tanggal:** 10 Oktober 2026 · **Mengacu:** PRD FINAL M1–M6 CONFLUENSE v1.0.8
 **Sifat dokumen:** referensi desain untuk tampilan output PRD. Ini **bukan** perintah membangun aplikasi, dan tidak mengubah satu pun rumus, bobot, status, atau aturan di PRD. Bila ada perbedaan, **PRD yang berlaku**.
 
 ---
@@ -323,4 +323,4 @@ UI dianggap sesuai PRD jika semua butir ini lulus:
 
 - [Kuantara Terminal — kuantara.id](https://kuantara.id/) (struktur workspace multi-panel, pola list–detail, kanban riset, screener berfilter, skor komposit 0–100, alert Telegram, copy Indonesia).
 - [Kuantara Analytics — LinkedIn](https://www.linkedin.com/in/kuantara-analytics-8236b1360/) (deskripsi produk).
-- PRD FINAL M1–M6 CONFLUENSE v1.0.7 (semua kode status, field, rumus, dan aturan yang ditampilkan).
+- PRD FINAL M1–M6 CONFLUENSE v1.0.8 (semua kode status, field, rumus, dan aturan yang ditampilkan).

@@ -1,4 +1,4 @@
-/* Malomo V7 — M1 Market Structure & Regime (PRD v1.0.7 §2–§3).
+/* Malomo V7 — M1 Market Structure & Regime (PRD v1.0.8 §2–§3).
    M1 = structure45 + te25 + adx10 + vol20; arah = field terpisah, bukan tanda skor. */
 (function(root,factory){
   if(typeof module==='object'&&module.exports)module.exports=factory(require('./core'));

@@ -1,4 +1,4 @@
-/* Malomo V7 — pipeline keputusan per close 4H (PRD v1.0.7 §8–§10):
+/* Malomo V7 — pipeline keputusan per close 4H (PRD v1.0.8 §8–§10):
    INGEST → VALIDASI → INDIKATOR → M1 → GENERATOR M2 → KANONISASI → SKOR M2/AUDIT → M3 → M5 → CLOSE_CANDIDATE
    → NEXT_OPEN → CEK RISIKO M4 → RANKING M6 → ENTRY_CONSIDER | REJECTED_* | NO_ENTRY → LOG AUDIT.
    Tidak ada order. Semua keluaran berlabel research_only. */
@@ -8,7 +8,7 @@
 })(typeof globalThis!=='undefined'?globalThis:this,function(C,M1,G,M2,R){
   'use strict';
   const {H4,fin,iso,PAIRS}=C;
-  const SCHEMA='PRD_M1_M6_CONFLUENSE_V1',SCORE_VERSION='MALOMO_V7_ENGINE_PRD_1.0.7';
+  const SCHEMA='PRD_M1_M6_CONFLUENSE_V1',SCORE_VERSION='MALOMO_V7_ENGINE_PRD_1.0.8';
   const FAMILY_ORDER=['BREAKOUT_RETEST','PULLBACK_CONTINUATION','REVERSAL_RETEST'];
 
   // Analisis satu simbol atas candle yang sudah close. Semua langkah kausal, jadi indeks k hanya bergantung pada c[0..k].

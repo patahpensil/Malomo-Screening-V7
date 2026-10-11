@@ -1,5 +1,5 @@
 /* Malomo V7 — susunan satu siklus 4H untuk tampilan (fungsi murni, tanpa DOM/jaringan).
-   Semua keputusan berasal dari engine PRD v1.0.7 (pipeline.decide). Modul ini hanya:
+   Semua keputusan berasal dari engine PRD v1.0.8 (pipeline.decide). Modul ini hanya:
    - mengubah kline Binance menjadi candle engine,
    - menjalankan decide secara kronologis atas candle yang diunduh supaya portofolio simulasi §6 (slot 24 jam,
      ekuitas 100 tanpa kompaun) terbentuk dari keputusan sebelumnya,

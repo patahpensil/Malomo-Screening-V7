@@ -1,5 +1,5 @@
 /* Malomo V7 — M2 fitur momentum/participation, kalibrasi ECDF per keluarga, skor kualitas 80 dan integritas 20
-   (PRD v1.0.7 §2 Kalibrasi, §4.4–§4.6). Semua ECDF tie kanan; tiap keluarga memakai array-nya sendiri. */
+   (PRD v1.0.8 §2 Kalibrasi, §4.4–§4.6). Semua ECDF tie kanan; tiap keluarga memakai array-nya sendiri. */
 (function(root,factory){
   if(typeof module==='object'&&module.exports)module.exports=factory(require('./core'));
   else (root.Malomo=root.Malomo||{}).m2=factory(root.Malomo.core);

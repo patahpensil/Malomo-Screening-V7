@@ -1,5 +1,5 @@
 'use strict';
-/* Tes engine Malomo V7 terhadap PRD v1.0.7: utilitas inti (paritas pandas/numpy), M1, generator (I01/I02/T04–T06,
+/* Tes engine Malomo V7 terhadap PRD v1.0.8: utilitas inti (paritas pandas/numpy), M1, generator (I01/I02/T04–T06,
    Pullback, Reversal), M2, M3, M4/portofolio (I05/I06), pipeline (T10–T20), dan kontrak JSON §10. */
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const C=require('../engine/core'),M1=require('../engine/m1'),G=require('../engine/generators'),M2=require('../engine/m2'),R=require('../engine/m3m4'),P=require('../engine/pipeline');

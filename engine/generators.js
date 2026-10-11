@@ -1,4 +1,4 @@
-/* Malomo V7 — generator sinyal M2 (PRD v1.0.7 §4.2–§4.4): Breakout–Retest, Pullback Continuation, Reversal–Retest.
+/* Malomo V7 — generator sinyal M2 (PRD v1.0.8 §4.2–§4.4): Breakout–Retest, Pullback Continuation, Reversal–Retest.
    Satu lintasan maju atas candle yang sudah close; indeks event relatif terhadap deret yang diberikan.
    Status: WAITING_RETEST / WAITING_ZONE / WAITING_CONTINUATION / CHOCH_CANDIDATE → CONFIRMED / INVALID / EXPIRED /
    PREZONE_CENSORED. Bila deret berakhir sebelum event selesai, status tunggu dipertahankan (live) atau CENSORED (arsip). */

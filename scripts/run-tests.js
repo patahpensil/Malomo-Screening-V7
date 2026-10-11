@@ -4,7 +4,7 @@
 const {spawnSync}=require('node:child_process'),fs=require('node:fs'),path=require('node:path');
 const ROOT=path.resolve(__dirname,'..');
 const SUITES=[
-  {name:'Engine M1–M6 (PRD v1.0.7)',cmd:'node',args:['scripts/test-engine.js']},
+  {name:'Engine M1–M6 (PRD v1.0.8)',cmd:'node',args:['scripts/test-engine.js']},
   {name:'Paritas skor M2 vs bukti 2024',cmd:'node',args:['scripts/test-parity-m2.js']},
   {name:'Aplikasi (siklus, transport, live, label)',cmd:'node',args:['scripts/test-app.js']},
   {name:'Verifier PRD (Python)',cmd:'python3',args:['verify_final_prd.py'],json:true},

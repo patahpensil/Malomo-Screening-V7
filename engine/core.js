@@ -1,4 +1,4 @@
-/* Malomo V7 — utilitas inti engine (PRD v1.0.7 §1–§2): fungsi murni, kausal, tanpa DOM/jaringan/order.
+/* Malomo V7 — utilitas inti engine (PRD v1.0.8 §1–§2): fungsi murni, kausal, tanpa DOM/jaringan/order.
    Candle: {t: open ms UTC, ct: close ms, open, high, low, close, volume (base), quoteVolume, trades, takerBuyBase}. */
 (function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else (root.Malomo=root.Malomo||{}).core=api;})(typeof globalThis!=='undefined'?globalThis:this,function(){
   'use strict';

@@ -4,13 +4,13 @@ Spesifikasi riset **enam metodologi trading berbobot (M1–M5) dan M6 CONFLUENSE
 
 > **Riset saja.** Repo ini berisi spesifikasi, bukti, engine, dan alat verifikasi. **Tidak ada kode order** dan tidak ada API key; koneksi ke Binance (tahap 2) hanya membaca data pasar publik. Skor M6 adalah **indeks desain (0–500), bukan probabilitas menang**, dan belum ada backtest komposit M1–M5 yang membuktikan edge ekonomi.
 
-**Sumber kebenaran tunggal adalah PRD.** Semua logika (skor, generator, kalibrasi, status, risiko, portofolio, keputusan) mengikuti PRD v1.0.7. Dari aplikasi `ict-screening` hanya diambil **pola live** dan **sebagian UI kartu Decision** — lihat [Hubungan dengan ICT Screening](#hubungan-dengan-ict-screening).
+**Sumber kebenaran tunggal adalah PRD.** Semua logika (skor, generator, kalibrasi, status, risiko, portofolio, keputusan) mengikuti PRD v1.0.8. Dari aplikasi `ict-screening` hanya diambil **pola live** dan **sebagian UI kartu Decision** — lihat [Hubungan dengan ICT Screening](#hubungan-dengan-ict-screening).
 
 ## Isi
 
 | Berkas | Fungsi |
 |---|---|
-| `PRD_FINAL_ENAM_METODOLOGI_M1_M6_CONFLUENSE_2026-10-10.md` | **Spesifikasi normatif tunggal** (v1.0.7-FINAL-DESIGN): rumus M1–M6, status tiga lapis, kontrak JSON, acceptance test, riwayat revisi |
+| `PRD_FINAL_ENAM_METODOLOGI_M1_M6_CONFLUENSE_2026-10-10.md` | **Spesifikasi normatif tunggal** (v1.0.8-FINAL-DESIGN): rumus M1–M6, status tiga lapis, kontrak JSON, acceptance test, riwayat revisi |
 | `LAPORAN_VALIDASI_PRD_FINAL_M1_M6_2026-10-10.md` | Batas bukti dan ringkasan verifikasi tiap revisi |
 | `verify_final_prd.py` | Verifier offline (Python 3 standar, tanpa dependensi) |
 | `VALIDASI_PRD_FINAL_M1_M6.json` | Hasil verifier terakhir |
@@ -44,9 +44,9 @@ Hasil yang diharapkan: **32 PASS, 0 FAIL**. Cakupannya kontrak, aritmetika, kons
 
 ## Engine (tahap 1)
 
-Fungsi murni JavaScript (UMD: jalan di Node dan browser), kausal, tanpa DOM, jaringan, atau order. Seluruh logika engine ditulis dari PRD v1.0.7; tidak ada logika yang diambil dari `ict-screening` (fungsi ADX di sana memakai seed Wilder klasik, sedangkan PRD mewajibkan `ewm(alpha=1/14, adjust=False)`).
+Fungsi murni JavaScript (UMD: jalan di Node dan browser), kausal, tanpa DOM, jaringan, atau order. Seluruh logika engine ditulis dari PRD v1.0.8; tidak ada logika yang diambil dari `ict-screening` (fungsi ADX di sana memakai seed Wilder klasik, sedangkan PRD mewajibkan `ewm(alpha=1/14, adjust=False)`).
 
-| Modul | Isi (PRD v1.0.7) |
+| Modul | Isi (PRD v1.0.8) |
 |---|---|
 | `engine/core.js` | Validasi candle & gap (§1), `ewm(alpha=1/14, adjust=False)` identik pandas, ATR/DI/ADX, pivot 5-bar ketat, ECDF tie kanan, kuantil linear, Pearson (§2) |
 | `engine/m1.js` | Struktur BULLISH/BEARISH/TRANSITION, TE14, ADX, NATR typicality (§3) |
