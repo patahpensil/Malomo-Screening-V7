@@ -2,7 +2,9 @@
 
 Spesifikasi riset **enam metodologi trading berbobot (M1–M5) dan M6 CONFLUENSE** untuk enam pair Binance USDⓈ-M Futures (`BTCUSDT`, `ETHUSDT`, `SOLUSDT`, `BNBUSDT`, `DOGEUSDT`, `XRPUSDT`), candle 4H, waktu UTC.
 
-> **Riset saja.** Repo ini berisi spesifikasi, bukti, dan alat verifikasi. Tidak ada kode order, koneksi exchange, atau deploy. Skor M6 adalah **indeks desain (0–500), bukan probabilitas menang**, dan belum ada backtest komposit M1–M5 yang membuktikan edge ekonomi.
+> **Riset saja.** Repo ini berisi spesifikasi, bukti, engine, dan alat verifikasi. **Tidak ada kode order** dan tidak ada API key; koneksi ke Binance (tahap 2) hanya membaca data pasar publik. Skor M6 adalah **indeks desain (0–500), bukan probabilitas menang**, dan belum ada backtest komposit M1–M5 yang membuktikan edge ekonomi.
+
+**Sumber kebenaran tunggal adalah PRD.** Semua logika (skor, generator, kalibrasi, status, risiko, portofolio, keputusan) mengikuti PRD v1.0.7. Dari aplikasi `ict-screening` hanya diambil **pola live** dan **sebagian UI kartu Decision** — lihat [Hubungan dengan ICT Screening](#hubungan-dengan-ict-screening).
 
 ## Isi
 
@@ -40,7 +42,7 @@ Hasil yang diharapkan: **32 PASS, 0 FAIL**. Cakupannya kontrak, aritmetika, kons
 
 ## Engine (tahap 1)
 
-Fungsi murni JavaScript (UMD: jalan di Node dan browser), kausal, tanpa DOM, jaringan, atau order. Pola modul mengikuti `ict-screening`.
+Fungsi murni JavaScript (UMD: jalan di Node dan browser), kausal, tanpa DOM, jaringan, atau order. Seluruh logika engine ditulis dari PRD v1.0.7; tidak ada logika yang diambil dari `ict-screening` (fungsi ADX di sana memakai seed Wilder klasik, sedangkan PRD mewajibkan `ewm(alpha=1/14, adjust=False)`).
 
 | Modul | Isi (PRD v1.0.7) |
 |---|---|
@@ -64,6 +66,49 @@ Yang sudah terbukti: `ewm`/ATR/ADX identik pandas; M3 identik numpy; skor kualit
 1. **Zona Pullback dilompati dalam satu candle.** Sesuai teks PRD, zona dinilai dari kedalaman `d` pada close candle (memakai `minLow`). Jika satu candle membawa `d` dari < 0.25 langsung ke 0.75–0.85, zona dianggap tidak tersentuh dan setup akhirnya `PREZONE_CENSORED`. Perlu konfirmasi apakah kode `pullback_v2` memakai rentang intrabar.
 2. **Reason `PLAN_RISK_INVALID`.** Dipakai bila stop ≤ 0 atau rencana tidak finite (M4 `D=0`). Kode ini belum ada di daftar reason PRD.
 3. **Candle pertama deret.** TR dan ±DM pada candle pertama dianggap tak terdefinisi (previous close belum ada). Arsip historis mungkin memakai 0 atau `high−low`; pengaruhnya meluruh < 0.01% setelah warmup.
+
+## Hubungan dengan ICT Screening
+
+Batas adopsi dari [`patahpensil/ict-screening`](https://github.com/patahpensil/ict-screening) (disepakati 11 Okt 2026). Di luar dua hal pada tabel A dan B, semuanya mengikuti PRD.
+
+**A. Pola live yang diadopsi** (dari `app/market.js` dan `app/live.js`)
+
+| Pola ICT | Dipakai di Malomo untuk |
+|---|---|
+| Antrean request REST (jeda 200 ms, timeout 20 detik, cooldown 429/418 + `Retry-After`) | Lapisan transport. Bila tetap gagal, siklus ditandai `FETCH_FAILED` dan dicoba ulang 30/60/120 detik (PRD §1) |
+| Sinkron jam server Binance (`/fapi/v1/time`) | Penentuan candle 4H sudah close (aturan closed-bar PRD) |
+| Cache candle sampai candle berikutnya close | Candle 4H 6 pair diunduh sekali per siklus |
+| WebSocket ticker + watchdog 20 detik + reconnect bertahap | Harga live di kartu Decision |
+| Stream per posisi: aggTrade (CVD), depth20 (orderbook), poll Open Interest | Sel data live di kartu Decision — **hanya tampilan, tidak pernah masuk skor** (PRD §4.5) |
+
+**B. Sebagian UI kartu Decision yang diadopsi** (`.dec-card`)
+
+- Header: tag RUNNING berdenyut, simbol, badge LONG/SHORT, baris meta (keluarga sinyal, waktu masuk, lama berjalan).
+- Harga live dan R-multiple berjalan.
+- Bilah progres stop → entry → target.
+- Grid level: SL · ENTRY · TP (2R) · RR.
+- Sel data: Open Interest · CVD · Orderbook, ditambah sel ke-4 yang diisi sesuai PRD — hitung mundur slot 24 jam dan level invalidasi.
+
+Isi kartu berasal dari posisi simulasi `ENTRY_CONSIDER` (PRD §6), bukan dari tracker ICT.
+
+**C. Tidak diadopsi — tetap PRD**
+
+| Di ICT Screening | Di Malomo V7 (PRD) |
+|---|---|
+| Universe Top 100 dari 250 pair, scan tiap 60 detik | 6 pair tetap, siklus per close 4H |
+| Engine turtle/intraday, tombol LONG/SKIP/SHORT | M1–M6 Confluense, status tiga lapis (`event_status` / `score_status` / `status`) |
+| ARMED → RUNNING saat harga menyentuh entry | Entry hipotetis di open candle berikutnya (fase `ENTRY_REVIEW`) |
+| Keluar di SL atau exit 20 hari, jurnal otomatis win/loss | Slot 24 jam tetap; stop/target hanya dicatat sebagai outcome riset |
+| Risiko 0,5%, maks 5 posisi per arah, stop saat drawdown 20% | Risiko 1% / terbuka 3% / gross 1× / 3 slot / 1 posisi per pair |
+| Tema CSS, watchlist, kalkulator, layout ICT | Layar dan token warna sesuai `docs/uiux/REFERENSI_UIUX_SCREENING_MALOMO_V1.md` |
+
+## Tahapan
+
+| Tahap | Isi | Status |
+|---|---|---|
+| 1 | Engine M1–M6 + tes + paritas skor M2 | Selesai (`npm test` 35/35) |
+| 2 | Data live Binance (pola A) dan layar Decision (pola B) | Berikutnya |
+| 3 | Layar lain sesuai referensi UI/UX, PWA, GitHub Pages | Menyusul |
 
 ## Catatan bukti
 
