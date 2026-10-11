@@ -1,0 +1,143 @@
+{
+  "existing_2024_canonical_events": 410,
+  "failed": 0,
+  "output_warning": "M2 audit20 was NOT_RECOMPUTED for 410 event source; an M6 historical pnl test cannot be inferred from this file",
+  "passed": 32,
+  "scope": "arithmetic, contract and existing evidence only; NOT economic backtest of new M6",
+  "tests": {
+    "E01": {
+      "detail": "410/410 M1 and M2 quality additive, in bounds",
+      "status": "PASS"
+    },
+    "E02": {
+      "detail": "prior generator v2 contract snapshot 33 PASS",
+      "status": "PASS"
+    },
+    "E03": {
+      "detail": "train normalization counts: 258/189/44",
+      "status": "PASS"
+    },
+    "T01": {
+      "detail": "M1-M5 weights each = 100; M2 80+20",
+      "status": "PASS"
+    },
+    "T02": {
+      "detail": "example M6 =395; display =79%",
+      "status": "PASS"
+    },
+    "T03": {
+      "detail": "M1 synthetic",
+      "status": "PASS"
+    },
+    "T04": {
+      "detail": "wick only high>level does not satisfy close criterion",
+      "kind": "STATIC_CONTRACT_CHECK",
+      "status": "PASS"
+    },
+    "T05": {
+      "detail": "retest after break only",
+      "kind": "STATIC_CONTRACT_CHECK",
+      "status": "PASS"
+    },
+    "T06": {
+      "detail": "invalidation precedes intrabar touch/confirmation",
+      "status": "PASS"
+    },
+    "T07": {
+      "detail": "pullback = 27.33333333",
+      "status": "PASS"
+    },
+    "T08": {
+      "detail": "right-tie policy and freeze prevents future information contamination",
+      "status": "PASS"
+    },
+    "T09": {
+      "detail": "missing tail window -> INCOMPLETE",
+      "kind": "STATIC_CONTRACT_CHECK",
+      "status": "PASS"
+    },
+    "T10": {
+      "detail": "gross cap rejects, no M6",
+      "status": "PASS"
+    },
+    "T11": {
+      "detail": "opposed directions block selection",
+      "status": "PASS"
+    },
+    "T12": {
+      "detail": "multi-family same event collision",
+      "status": "PASS"
+    },
+    "T13": {
+      "detail": "exact labels dedup",
+      "status": "PASS"
+    },
+    "T14": {
+      "detail": "non-scored families excluded",
+      "kind": "STATIC_CONTRACT_CHECK",
+      "status": "PASS"
+    },
+    "T15": {
+      "detail": "M5 historical snapshot",
+      "kind": "STATIC_CONTRACT_CHECK",
+      "status": "PASS"
+    },
+    "T16": {
+      "detail": "higher confluence ranks first",
+      "status": "PASS"
+    },
+    "T17": {
+      "detail": "concurrent cap rejects additional candidate",
+      "status": "PASS"
+    },
+    "T18": {
+      "detail": "integrity partial prohibits numeric ranking",
+      "status": "PASS"
+    },
+    "T19": {
+      "detail": "missing taker/M2 means no M6",
+      "status": "PASS"
+    },
+    "T20": {
+      "detail": "order invariant for canonicalization",
+      "status": "PASS"
+    },
+    "T21": {
+      "detail": "three-layer status codes valid in both JSON examples",
+      "status": "PASS"
+    },
+    "T22": {
+      "detail": "required fields present; gross_pct arithmetic; rejected m6=null",
+      "status": "PASS"
+    },
+    "T23": {
+      "detail": "sample reconciliation 258/152/410; legacy 257 wording removed",
+      "status": "PASS"
+    },
+    "T24": {
+      "detail": "v1.0.2 time fields, ATR_entry and M1_origin rules present",
+      "status": "PASS"
+    },
+    "T25": {
+      "detail": "v1.0.3 indicator method and Pullback window fixed",
+      "status": "PASS"
+    },
+    "T26": {
+      "detail": "v1.0.4 conflict4 log contract and evidence scope labels present",
+      "status": "PASS"
+    },
+    "T27": {
+      "detail": "v1.0.5 data/gap reasons, fixed 24h slot, M4 reason codes, display field",
+      "status": "PASS"
+    },
+    "T28": {
+      "detail": "causal ECDF CSV: hash, counts, prior counts, null policy, scores recomputed from raw features",
+      "status": "PASS"
+    },
+    "T29": {
+      "detail": "language-code audit: status tokens registered, JSON ATR fields, M1/M2 component formulas 410/410",
+      "status": "PASS"
+    }
+  },
+  "version": "PRD_M1_M6_CONFLUENSE_V1"
+}
