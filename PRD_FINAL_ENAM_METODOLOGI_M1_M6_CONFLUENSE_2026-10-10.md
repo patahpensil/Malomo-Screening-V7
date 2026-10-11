@@ -1,6 +1,6 @@
 # PRD FINAL — ENAM METODOLOGI TRADING BERBOBOT & M6 CONFLUENSE
 
-**Versi:** 1.0.8-FINAL-DESIGN (revisi konsistensi dokumen atas 1.0.0; lihat Riwayat revisi)  
+**Versi:** 1.0.9-FINAL-DESIGN (revisi konsistensi dokumen atas 1.0.0; lihat Riwayat revisi)  
 **Tanggal keputusan:** 10 Oktober 2026  
 **Bahasa spesifikasi:** Indonesia; nama field dan status Inggris untuk kontrak antar-agen.  
 **Ruang lingkup:** spesifikasi metodologi penelitian dan protokol keluaran agen; **bukan permintaan membuat aplikasi, mengirim order, commit, push, atau deploy**.  
@@ -22,6 +22,7 @@
 | 1.0.6 | 10 Okt 2026 | (R18) CSV skor kausal 772 event ditambahkan ke `evidence/`, kolom resmi ditetapkan, catatan "belum disertakan" ditutup; angka 257 terverifikasi; catatan audit selisih diagnostik Reversal dan identitas bentrok (§12.1). | Melengkapi bukti; **tidak mengubah bobot, rumus skor, atau angka historis** |
 | 1.0.7 | 10 Okt 2026 | Audit menyeluruh: (R19) §0 butir 5 memakai kode resmi §9 (menghapus dua kode lama yang tidak terdaftar di §9). (R20) Definisi warmup indikator ewm (§1). (R21) `ENTRY_REVIEW` ditegaskan sebagai nama fase. (R22) Field JSON `atr_entry_frozen` diganti `atr_entry` + `atr_frozen`; contoh ditolak dilengkapi `equity_sim`/ATR (§10). (R23) Tabel pemetaan label CSV audit → kontrak PRD (§12.1). (R24) Label Spearman §12.1: mengukur `signal_generation_30`, bukan kualitas 80; train −0.054 berasal dari sampel 257. Rumus diverifikasi ulang 410/410 terhadap CSV kanonis (struktur, TE+ADX, grid vol20, generation Breakout, momentum, participation, grid ECDF k/258). | Konsistensi bahasa–kode; **tidak mengubah bobot, rumus skor, atau angka historis** |
 | 1.0.8 | 11 Okt 2026 | Paritas engine terhadap candle asli Binance 2024 dan jawaban audit generator arsip: (R25) Breakout — satu event aktif per (pair,side), event lama diselesaikan dulu lalu fresh cross dievaluasi pada candle sama, pivot boleh dipakai ulang setelah event selesai (§4.2). (R26) Pullback — satu setup aktif per (symbol,side), impuls baru tidak membuka setup kedua (§4.3). (R27) Reversal — syarat harga **dan** kronologi indeks pivot `l2<l1<h1` / `h2<h1<l1`, protected = `l1`/`h1` terbaru, satu event aktif per sisi, protected pivot tidak dipakai ulang (§4.4). (R28) Epsilon penyebut E4 mengikuti versi generator: Breakout v1 `+1e−12`, Pullback/Reversal v2 tanpa epsilon (§4.5). (R29) Tes engine I07–I09: regresi 11 Reversal terlarang, pakai ulang pivot Breakout, paritas 772/772 (§11). | Menyelaraskan PRD dengan generator arsip yang diuji; **tidak mengubah bobot, rumus skor, parameter, atau populasi event historis** |
+| 1.0.9 | 11 Okt 2026 | (R30) §14 baru: hasil Tahap A — uji arsitektur sistem (backtest komposit, ablation per lapis) atas 30 pair USDⓈ-M paling likuid, Feb 2024–Okt 2026, data asli Binance; temuan per lapis, usulan perbaikan (benahi/tambah/kurangi), dan kriteria lanjut ke Tahap B. | **Temuan dan usulan**, belum mengubah aturan normatif §1–§13; perubahan aturan hanya lewat revisi terpisah setelah disetujui pengguna |
 
 ## 0. Hirarki kewenangan dan larangan interpretasi
 
@@ -550,3 +551,89 @@ Fingerprint berikut adalah **Git blob SHA**, **bukan commit SHA**. Agen bisa mem
 - **Dilarang** menyebut skor gabungan sebagai probabilitas keberhasilan, *backtested winning edge*, atau sertifikat profit. Jika bukti ekonomik belum ada, tulis fakta tersebut secara eksplisit **tanpa mengubah rumus atau menunda penyelesaian desain PRD**.
 
 **Status keputusan: FINAL_DESIGN — M1…M5 bobot tetap, M6 CONFLUENSE aditif, tanpa pertanyaan desain tambahan kepada agen.**
+
+## 14. Tahap A — Uji arsitektur sistem (backtest komposit 2024–2026) dan usulan perbaikan (v1.0.9)
+
+**Sifat bagian ini:** catatan hasil uji dan **usulan** perbaikan. Aturan normatif §1–§13 **tidak berubah** oleh bagian ini; setiap usulan yang diterima pengguna wajib dituangkan sebagai revisi PRD terpisah dan diuji ulang dengan protokol yang sama.
+
+### 14.1 Desain uji (dikunci sebelum hasil dilihat)
+
+| Aspek | Ketentuan |
+|---|---|
+| Yang diuji | **Arsitektur dan cara kerja aplikasi**, lapis demi lapis: generator sinyal → gate arah M1 → aturan bentrok → skor/ranking M6 → kapasitas portofolio → exit → biaya. Engine yang dipakai identik dengan aplikasi (PRD v1.0.8, paritas 772/772). |
+| Data | Kline 4H dan funding rate **asli** Binance USDⓈ-M dari arsip resmi data.binance.vision (checksum resmi), 1 Jan 2024 – 9 Okt 2026; keputusan mulai 1 Feb 2024 (warmup). |
+| Universe | 30 pair USDⓈ-M dengan total quote volume terbesar pada periode tersebut dari ±75 kandidat (minimal 12 bulan data): BTC, ETH, SOL, XRP, DOGE, 1000PEPE, BNB, SUI, ADA, WIF, ENA, LINK, AVAX, WLD, TRUMP, HYPE, LTC, 1000SHIB, NEAR, ORDI, BCH, FIL, 1000BONK, FARTCOIN, UNI, AAVE, ARB, NEIRO, DOT, TIA (semua …USDT). M3 tetap basket enam pair §1. Bias: pair yang sudah delisting tidak ikut (survivorship). |
+| Kalibrasi | Array beku 2024 (kebijakan FROZEN_COMPLETE_TRAIN_ECDF) untuk semua event. |
+| Trade | Entry open(t+1); stop 1.5·ATR_entry; target 2R; horizon 24 jam; stop dievaluasi lebih dulu bila stop dan target tersentuh pada candle yang sama; candle melintasi gap tidak dinilai. |
+| Biaya | 9 bps dan 18 bps round-trip atas notional + funding rate asli selama posisi terbuka. Ukuran posisi §6 (risiko 1%, notional ≤ 1× ekuitas, tanpa kompaun). |
+| Metode | **Ablation**: tiap lapis dimatikan atau diganti, sistem lain tetap. Seluruh periode dinilai sekaligus; hasil per tahun (2024, 2025, 2026) hanya **uji konsistensi** — perubahan dianggap memperbaiki bila rata-rata R per trade positif di ketiga tahun. Signifikansi: t-stat rata-rata R. |
+| Reproduksi | `scripts/backtest/fetch-universe.js` (data) dan `scripts/backtest/run.js` (uji); hasil di `results/tahap-a/summary.json` dan `trades.csv.gz`. Alokator ablation direkonsiliasi dengan portofolio engine: jumlah posisi sistem baseline identik (2.234). |
+
+### 14.2 Hasil utama
+
+| Populasi (biaya 9 bps) | n trade | R rata-rata | t | 2024 | 2025 | 2026 |
+|---|---:|---:|---:|---:|---:|---:|
+| Sinyal lolos semua gerbang, dinilai per sinyal (tanpa batas kapasitas) | 7.190 | −0.004 | −0.38 | +0.052 | −0.021 | −0.044 |
+| Sinyal yang ditolak gate arah M1 | 4.838 | +0.005 | +0.38 | +0.006 | +0.017 | −0.010 |
+| Sinyal bentrok (`MULTI_METHOD_COLLISION`) | 2.232 | −0.025 | −1.24 | −0.028 | −0.075 | +0.047 |
+| **Sistem penuh PRD** (ranking M6, kapasitas §6) | 2.234 | **+0.032** | 1.56 | +0.046 | +0.042 | +0.003 |
+| Sistem penuh PRD, biaya **18 bps** | 2.234 | +0.010 | 0.49 | +0.025 | +0.021 | −0.022 |
+
+Keterangan sistem penuh 9 bps: win 46.7%, profit factor 1.08, akumulasi +72% ekuitas acuan (tanpa kompaun) dengan drawdown maksimum 36%, rangkaian rugi terpanjang 15. Exit: 60% habis waktu 24 jam, 29% stop, 11% target. Funding rata-rata −0.008% per trade (kecil). Distribusi status: **seluruh 990 event Reversal berakhir `MULTI_METHOD_COLLISION`** (bentrok dengan Breakout pada key yang sama), sehingga keluarga Reversal tidak pernah dapat ditradingkan.
+
+### 14.3 Ablation per lapis (sistem penuh, R rata-rata per trade)
+
+| Kode | Perubahan arsitektur | 9 bps: R (t) | 2024 / 2025 / 2026 | 18 bps: R | Konsisten 3/3 (9 bps) |
+|---|---|---:|---|---:|:-:|
+| A0 | Baseline PRD | +0.032 (1.56) | +0.046 / +0.042 / +0.003 | +0.010 | ya |
+| G1 | Hanya generator Breakout | −0.008 (−0.32) | −0.006 / 0.000 / −0.019 | −0.030 | tidak |
+| G2 | Hanya generator Pullback | +0.009 (0.37) | +0.064 / −0.019 / −0.020 | −0.014 | tidak |
+| D1 | Gate arah M1 pair dimatikan | +0.013 (0.69) | +0.020 / +0.018 / −0.001 | −0.009 | tidak |
+| D2 | Gate rezim BTC menggantikan gate pair | +0.015 (0.59) | +0.012 / +0.019 / +0.016 | −0.008 | ya |
+| D3 | Gate pair **dan** searah struktur M1 BTC | +0.026 (0.91) | +0.010 / +0.052 / +0.011 | +0.002 | ya |
+| D4 | Gate pair + tolak trade berlawanan struktur M1 BTC | +0.029 (1.32) | +0.017 / +0.046 / +0.020 | +0.006 | ya |
+| R1 | Ranking acak (median) | +0.034 (1.68) | +0.069 / +0.029 / 0.000 | +0.014 | ya |
+| R2 | Ranking M1+M2q | +0.032 (1.56) | sama persis dengan A0 | +0.010 | ya |
+| R3 | Ranking likuiditas | +0.024 (1.18) | +0.055 / +0.031 / −0.021 | +0.001 | tidak |
+| K1 | Kapasitas 1 slot | +0.022 (0.65) | +0.026 / +0.008 / +0.035 | −0.001 | ya |
+| K2 | Kapasitas 5 slot / tanpa batas slot | +0.032 | sama persis dengan A0 | +0.010 | ya |
+| C1 | Lewati close dengan ≥4 sinyal serentak | +0.035 (1.62) | +0.013 / +0.049 / +0.043 | +0.012 | ya |
+| X1 | Horizon 48 jam | −0.003 (−0.10) | −0.006 / −0.022 / +0.024 | −0.025 | tidak |
+| X2 | Stop 2·ATR, target 3R, horizon 48 jam | +0.033 (1.11) | +0.086 / −0.006 / +0.021 | +0.016 | tidak |
+| U1 | Universe hanya enam pair inti §1 | −0.006 (−0.17) | +0.067 / −0.013 / −0.092 | −0.038 | tidak |
+| B1 | Gate pair + rezim BTC + lewati ≥4 serentak | +0.051 (1.69) | −0.022 / +0.084 / +0.104 | +0.028 | tidak |
+
+Diagnostik tambahan (sinyal lolos gerbang, per sinyal, 9 bps): kuintil M6 **tidak monoton** di ketiga tahun; ranking M6 sama persis dengan ranking M1+M2q karena M3, M4, dan M5 bernilai sama untuk semua kandidat pada satu close; urutan M6 terbalik dan urutan acak menghasilkan R yang setara. Sinyal pada close dengan ≥7 sinyal serentak: +0.149 (2024), −0.162 (2025), −0.255 (2026) — tanda berbalik antartahun.
+
+### 14.4 Kesimpulan per lapis
+
+| Lapis | Temuan | Status |
+|---|---|---|
+| Generator sinyal (§4) | Edge per sinyal ≈ 0 (−0.004R, 7.190 trade); hanya 2024 positif. Breakout sendirian tidak positif; Pullback hanya 2024. **Akar masalah sistem.** | Perlu dibenahi |
+| Reversal (§4.4) | 990/990 event bentrok dengan Breakout → tidak pernah diranking | Tidak berfungsi dalam arsitektur saat ini |
+| Gate arah M1 pair (§8.1.2) | Sinyal yang ditolak tidak lebih buruk dari yang diterima | Tidak menambah edge |
+| Aturan bentrok (§9) | Sinyal bentrok rata-rata negatif | Bekerja; dipertahankan |
+| Skor M1–M5 & ranking M6 (§8) | Tidak memisahkan trade baik/buruk; setara acak | Tidak menambah edge |
+| Kapasitas portofolio (§6) | Pengikat sebenarnya adalah risiko terbuka 3% dan gross 1×, bukan batas 3 slot; kapasitas inilah yang membuat sistem positif tipis | Bekerja sebagai manajemen risiko |
+| Exit (§6) | 60% trade berakhir karena waktu; tidak ada varian exit yang konsisten | Bukan sumber perbaikan utama |
+| Biaya | Pada 18 bps seluruh varian ≈ 0 atau negatif | Penentu kelayakan |
+
+**Kesimpulan Tahap A:** arsitektur v1.0.9 **belum memiliki edge yang signifikan secara statistik** (seluruh varian t < 2) dan **tidak tahan biaya 18 bps**. Hasil positif tipis sistem penuh berasal dari pembatasan kapasitas, bukan dari kemampuan skor memilih sinyal. Sistem **belum layak** dipakai dengan uang nyata.
+
+### 14.5 Usulan perbaikan (menunggu persetujuan pengguna)
+
+| Jenis | Usulan | Dasar dari hasil uji |
+|---|---|---|
+| **Benahi** | **Generator sinyal** sebagai prioritas riset berikutnya: definisi setup baru diuji dengan protokol §14.1 sebelum dipakai. Setiap hipotesis wajib dinyatakan sebelum diuji. | Edge per sinyal ≈ 0 (§14.2) |
+| **Benahi** | **Exit dan horizon** dirancang ulang bersama generator (target 2R hanya tercapai 11% dalam 24 jam). | 60% exit karena waktu; tidak ada varian exit konsisten (X1, X2) |
+| **Tambah** | **Lapis rezim pasar BTC**: tolak trade yang berlawanan dengan struktur M1 BTCUSDT (D4) atau wajib searah (D3). | Satu-satunya perubahan gerbang yang positif di ketiga tahun (D2–D4) dengan drawdown lebih rendah; belum signifikan |
+| **Tambah** | **Eksekusi biaya rendah** (order maker/limit, target ≤ 9 bps round-trip) sebagai prasyarat penggunaan nyata. | Semua varian ≈ 0 atau negatif pada 18 bps |
+| **Tambah (hipotesis)** | Filter kepadatan sinyal (lewati close dengan ≥4 sinyal serentak) untuk diuji lanjut di Tahap B, **belum** untuk dipakai. | C1 konsisten 3/3 di sistem, tetapi efek per sinyal berbalik tanda antartahun |
+| **Kurangi** | **Ranking M6** sebagai penentu prioritas: ganti dengan aturan sederhana yang terdokumentasi, atau tampilkan M6 hanya sebagai informasi. M3 dan M5 tidak perlu ikut dijumlahkan untuk ranking. | Ranking M6 = ranking M1+M2q = setara acak (R1, R2) |
+| **Kurangi** | **Reversal–Retest** sebagai keluarga terpisah: hapus dari skor, atau rumuskan ulang prioritas bentroknya lalu uji ulang. | 990/990 bentrok |
+| **Kurangi** | **Gate arah M1 per pair** sebagai satu-satunya gerbang arah: digantikan atau dilengkapi lapis rezim BTC. | Sinyal yang ditolak gate ≈ sinyal yang diterima (D1) |
+| **Pertahankan** | Aturan bentrok §9, batas risiko §6 (1% / 3% / gross 1×), universe 30 pair likuid. | Bentrok negatif; kapasitas menahan drawdown; universe 6 pair saja lebih buruk (U1) |
+
+### 14.6 Kriteria lanjut ke Tahap B (uji forward)
+
+Arsitektur hasil revisi boleh masuk forward test dengan uang nyata hanya bila, dengan protokol §14.1 atas seluruh data 2024–2026 **dan biaya 18 bps + funding**: (1) R rata-rata per trade ≥ +0.05 dengan t ≥ 2.0; (2) positif di setiap tahun; (3) drawdown maksimum ≤ 25% ekuitas acuan pada risiko 1% per trade. Arsitektur v1.0.9 **belum memenuhi** ketiganya; Tahap B hanya boleh berupa **paper forward test** untuk pengumpulan data. Lulus kriteria ini pun **bukan** jaminan profit.

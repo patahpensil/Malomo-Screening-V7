@@ -5,3 +5,4 @@ _site/
 test-results.json
 data/ohlcv-2024/
 data/recent/
+data/bt/

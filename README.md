@@ -10,7 +10,7 @@ Spesifikasi riset **enam metodologi trading berbobot (M1–M5) dan M6 CONFLUENSE
 
 | Berkas | Fungsi |
 |---|---|
-| `PRD_FINAL_ENAM_METODOLOGI_M1_M6_CONFLUENSE_2026-10-10.md` | **Spesifikasi normatif tunggal** (v1.0.8-FINAL-DESIGN): rumus M1–M6, status tiga lapis, kontrak JSON, acceptance test, riwayat revisi |
+| `PRD_FINAL_ENAM_METODOLOGI_M1_M6_CONFLUENSE_2026-10-10.md` | **Spesifikasi normatif tunggal** (v1.0.9-FINAL-DESIGN): rumus M1–M6, status tiga lapis, kontrak JSON, acceptance test, riwayat revisi |
 | `LAPORAN_VALIDASI_PRD_FINAL_M1_M6_2026-10-10.md` | Batas bukti dan ringkasan verifikasi tiap revisi |
 | `verify_final_prd.py` | Verifier offline (Python 3 standar, tanpa dependensi) |
 | `VALIDASI_PRD_FINAL_M1_M6.json` | Hasil verifier terakhir |
@@ -99,6 +99,23 @@ Batas yang disengaja:
 - Selama ada pair `FETCH_FAILED` untuk close terakhir, keputusan yang bergantung lintas pair (ranking/alokasi) ditahan sebagai `NO_ENTRY` + `DATA_INCOMPLETE`.
 - Notifikasi Telegram (Referensi UI/UX §7) **belum dibangun**: butuh token bot yang tidak boleh disimpan di aplikasi statis; perlu keputusan terpisah.
 
+## Tahap A — uji arsitektur (backtest komposit)
+
+Backtest seluruh cara kerja aplikasi atas **30 pair USDⓈ-M paling likuid**, Feb 2024 – Okt 2026, data asli Binance (arsip resmi), biaya 9/18 bps + funding. Setiap lapis arsitektur dimatikan atau diganti (ablation); hasil per tahun hanya untuk uji konsistensi. Rincian dan usulan perbaikan: **PRD §14**.
+
+| Ringkasan (9 bps) | R/trade | t |
+|---|---:|---:|
+| Sinyal lolos gerbang, per sinyal (7.190) | −0.004 | −0.38 |
+| Sistem penuh PRD (2.234) | +0.032 | 1.56 |
+| Sistem penuh, 18 bps | +0.010 | 0.49 |
+
+Kesimpulan: belum ada edge yang signifikan; generator sinyal adalah akar masalah; ranking M6 setara acak; seluruh event Reversal bentrok; satu-satunya perbaikan gerbang yang konsisten 3/3 tahun adalah lapis rezim BTC. **Belum layak untuk uang nyata.**
+
+```bash
+node scripts/backtest/fetch-universe.js          # unduh data (butuh akses data.binance.vision); arsip juga di cabang data-bt
+node scripts/backtest/run.js data/bt 30          # → results/tahap-a/summary.json, trades.csv.gz
+```
+
 ## Hubungan dengan ICT Screening
 
 Batas adopsi dari [`patahpensil/ict-screening`](https://github.com/patahpensil/ict-screening) (disepakati 11 Okt 2026). Di luar dua hal pada tabel A dan B, semuanya mengikuti PRD.
@@ -142,6 +159,7 @@ Isi kartu berasal dari posisi simulasi `ENTRY_CONSIDER` (PRD §6), bukan dari tr
 | 2 | Data live Binance (pola A) dan kartu Decision (pola B) | Selesai |
 | 3 | Enam layar referensi UI/UX, PWA, GitHub Pages bergerbang tes | Selesai (uji browser 20/20) |
 | — | Paritas OHLCV 2024 dari candle asli | Selesai (772/772 event + skor) |
+| A | Uji arsitektur: backtest komposit 30 pair likuid 2024–2026 + usulan perbaikan (PRD §14) | Selesai — belum ada edge signifikan |
 
 ## Catatan bukti
 
