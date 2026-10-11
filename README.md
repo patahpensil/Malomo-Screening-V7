@@ -10,7 +10,7 @@ Spesifikasi riset **enam metodologi trading berbobot (M1–M5) dan M6 CONFLUENSE
 
 | Berkas | Fungsi |
 |---|---|
-| `PRD_FINAL_ENAM_METODOLOGI_M1_M6_CONFLUENSE_2026-10-10.md` | **Spesifikasi normatif tunggal** (v1.0.13-FINAL-DESIGN): rumus M1–M6, status tiga lapis, kontrak JSON, acceptance test, riwayat revisi |
+| `PRD_FINAL_ENAM_METODOLOGI_M1_M6_CONFLUENSE_2026-10-10.md` | **Spesifikasi normatif tunggal** (v1.0.14-FINAL-DESIGN): rumus M1–M6, status tiga lapis, kontrak JSON, acceptance test, riwayat revisi |
 | `LAPORAN_VALIDASI_PRD_FINAL_M1_M6_2026-10-10.md` | Batas bukti dan ringkasan verifikasi tiap revisi |
 | `verify_final_prd.py` | Verifier offline (Python 3 standar, tanpa dependensi) |
 | `VALIDASI_PRD_FINAL_M1_M6.json` | Hasil verifier terakhir |
@@ -174,6 +174,7 @@ Isi kartu berasal dari posisi simulasi `ENTRY_CONSIDER` (PRD §6), bukan dari tr
 | v1.0.11 | Lapisan penggunaan nyata: rencana siap salin (R32) + label rezim BTC (R33), PRD §16 | Selesai (uji browser 23/23) |
 | v1.0.12 | Universe 100 pair volume harian (R34, hard gate), PRD §17 | Selesai (uji browser 24/24; 75 pair asli identik) |
 | v1.0.13 | Tiga layar Decision / Semua Pair / Jurnal, skor dikunci, universe realtime (R35), PRD §18 | Selesai (uji browser 17/17; ledger data asli identik) |
+| v1.0.14 | Jurnal hanya sinyal Decision; tombol Simpan pengaturan (R36), PRD §18.7 | Selesai (uji browser 19/19) |
 
 ## Catatan bukti
 

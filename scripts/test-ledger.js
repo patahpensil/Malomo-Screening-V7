@@ -13,13 +13,14 @@ const rec=(o={})=>Object.assign({symbol:'SOLUSDT',side:'LONG',signal_family:'BRE
   scores:{m1_100:70,m2_signal_quality_80:60,m2_100:80,m3_100:25,m4_100:100,m5_100:55,m6_confluense_500:330,m1_plus_m2q_0_180_display_only:130}},o);
 const c=(i,o,h,l,cl)=>({t:T0+i*H4,open:o,high:h,low:l,close:cl});
 
-test('freeze: hanya ENTRY_CONSIDER; sumber live/replay; peringkat & rezim dicatat; field wajib tidak lengkap → diabaikan',()=>{
+test('freeze: hanya ENTRY_CONSIDER pada close berjalan (R36 — sinyal close lain/replay TIDAK dicatat); peringkat & rezim dicatat; field tidak lengkap → diabaikan',()=>{
   const L=LG.empty();
   const {added}=LG.freeze(L,[rec(),rec({symbol:'XRPUSDT',status:'REJECTED_RISK'}),rec({symbol:'ETHUSDT',decision_available_utc:new Date(T0-H4).toISOString(),entry_reference_time_utc:new Date(T0-H4).toISOString()}),rec({symbol:'BNBUSDT',stop_price:null})],
     {regimes:{['SOLUSDT|LONG|BREAKOUT_RETEST|'+rec().decision_available_utc]:{code:'ALIGNED',label:'BULLISH'}},ranks:{SOLUSDT:7},currentT:T0,now:T0+5000});
-  assert.equal(added.length,2);const e=Object.values(L.entries).find(x=>x.symbol==='SOLUSDT');
+  assert.equal(added.length,1);const e=Object.values(L.entries).find(x=>x.symbol==='SOLUSDT');
   assert.equal(e.source,'live');assert.equal(e.rank,7);assert.deepEqual(e.regime,{code:'ALIGNED',label:'BULLISH'});assert.equal(e.scores.m6,330);assert.equal(e.scores.m1m2q,130);
-  assert.equal(Object.values(L.entries).find(x=>x.symbol==='ETHUSDT').source,'replay');
+  assert(!Object.values(L.entries).some(x=>x.symbol==='ETHUSDT'),'sinyal close sebelumnya (replay) tidak boleh masuk jurnal');
+  assert.equal(LG.freeze(LG.empty(),[rec()],{now:T0}).added.length,0,'tanpa close berjalan → tidak ada yang dicatat');
 });
 test('SKOR DIKUNCI: record yang sama dengan skor/harga lain tidak pernah menimpa entri yang sudah ada',()=>{
   const L=LG.empty();LG.freeze(L,[rec()],{currentT:T0,now:T0});
@@ -64,13 +65,19 @@ test('load: data rusak/versi lain dibuang; entri sah dipertahankan apa adanya',(
   const L=LG.empty();LG.freeze(L,[rec()],{currentT:T0,now:T0});
   const raw=JSON.parse(JSON.stringify(L));raw.entries.bad={key:'bad',symbol:'Z'};raw.entries.bad2={key:'x',symbol:'ZUSDT',side:'LONG'};
   const back=LG.load(raw);assert.deepEqual(Object.keys(back.entries),Object.keys(L.entries));assert.deepEqual(back,L);
+  // migrasi dari v1.0.13: entri replay dibuang saat dimuat
+  const old=JSON.parse(JSON.stringify(L));const k0=Object.keys(old.entries)[0];old.entries.rp=Object.assign({},old.entries[k0],{key:'rp',source:'replay'});
+  assert.deepEqual(Object.keys(LG.load(old).entries),[k0]);
   assert.deepEqual(LG.load({version:99,entries:raw.entries}).entries,{});assert.deepEqual(LG.load(null).entries,{});
 });
 test('Hasil ledger = hasil outcome engine PRD §6 (cycle.outcome) untuk semua posisi siklus sintetis',()=>{
   const FROZEN=M2.frozenFrom(JSON.parse(fs.readFileSync(path.join(ROOT,'evidence/frozen_cdf_normalization.json'),'utf8')),JSON.parse(fs.readFileSync(path.join(ROOT,'evidence/frozen_v2_normalizations.json'),'utf8')));
   const RAW=S.generate({n:1600}),cand=Object.fromEntries(Object.entries(RAW).map(([s,r])=>[s,r.map(Cy.toCandle)]));
   const now=RAW.BTCUSDT[1599][0]+10000,st=Cy.buildState({rawBySymbol:cand,now,frozen:FROZEN});
-  const L=LG.freeze(LG.empty(),st.history,{currentT:st.T,now}).ledger;LG.resolve(L,cand,now);let n=0;
+  // aplikasi dianggap selalu terbuka: setiap close dibekukan pada siklusnya sendiri
+  const L=LG.empty();const Ts=[...new Set(st.history.map(r=>Date.parse(r.decision_available_utc)))].sort((a,b)=>a-b);
+  for(const T of Ts)LG.freeze(L,st.history.filter(r=>Date.parse(r.decision_available_utc)===T),{currentT:T,now:T});
+  LG.resolve(L,cand,now);let n=0;
   for(const p of [...st.book.closed,...st.book.active]){const e=L.entries[p.id];assert(e,'posisi tanpa entri ledger '+p.id);
     const want=p.outcome.code==='OPEN'?'OPEN':p.outcome.code;assert.equal(e.outcome.code,want,p.id);
     if(Number.isFinite(p.outcome.r))assert(Math.abs(e.outcome.r-p.outcome.r)<1e-9,p.id);n++;}
@@ -78,7 +85,7 @@ test('Hasil ledger = hasil outcome engine PRD §6 (cycle.outcome) untuk semua po
 });
 test('Batas ukuran: lebih dari 5.000 entri → entri tertua dibuang',()=>{
   const L=LG.empty(),recs=[];for(let i=0;i<5010;i++){const t=new Date(T0+i*H4).toISOString();recs.push(rec({symbol:'P'+i+'USDT',decision_available_utc:t,entry_reference_time_utc:t}));}
-  LG.freeze(L,recs,{currentT:T0,now:T0});assert.equal(Object.keys(L.entries).length,5000);assert(!Object.values(L.entries).some(e=>e.symbol==='P0USDT'));
+  for(const r of recs)LG.freeze(L,[r],{currentT:Date.parse(r.decision_available_utc),now:T0});assert.equal(Object.keys(L.entries).length,5000);assert(!Object.values(L.entries).some(e=>e.symbol==='P0USDT'));
 });
 
 (async()=>{

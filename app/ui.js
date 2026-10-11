@@ -34,12 +34,23 @@
   // ---------- R32 rencana siap salin ----------
   const usdt=v=>fin(v)?v.toFixed(2)+' USDT':'—';
   const ERR={EMPTY:'wajib diisi',INVALID:'tidak valid'};
+  // R36: status simpan pengaturan — selalu terlihat, supaya jelas tersimpan atau belum.
+  function execSaveStatus(ex){
+    const sv=X.validateSettings(ex.settings);
+    if(ex.storeFailed)return '<div id="exec-save-status" class="save-st bad" data-save="failed">⚠ Gagal menyimpan di browser ini (penyimpanan diblokir/penuh). Pengaturan hanya berlaku sampai halaman ditutup.</div>';
+    if(ex.dirty)return '<div id="exec-save-status" class="save-st warn" data-save="dirty">● Belum disimpan — tekan <b>Simpan</b>. Rencana masih memakai pengaturan tersimpan.</div>';
+    if(!sv.ok)return '<div id="exec-save-status" class="save-st warn" data-save="none">Belum ada pengaturan tersimpan. Isi modal lalu tekan <b>Simpan</b>.</div>';
+    return `<div id="exec-save-status" class="save-st ok" data-save="saved">✓ Tersimpan${ex.justSaved?' baru saja':''} · modal ${e(ex.settings.capital)} USDT · risiko ${e(ex.settings.riskPct)}% · biaya ${e(ex.settings.costBps)} bps${ex.savedAt?' · '+e(L.time(ex.savedAt)):''}</div>`;
+  }
   function execForm(ex){
-    const st=ex.settings||{},v=X.validateSettings(st),errs=v.errors||{};
+    const d=ex.draft||ex.settings,v=X.validateSettings(d),errs=ex.saveError?v.errors||{}:{},saved=X.validateSettings(ex.settings).ok;
     const rs=ex.rulesAt?`dimuat ${L.time(ex.rulesAt)}`:ex.rulesError?'gagal dimuat — rencana tampil belum dibulatkan':'memuat…';
-    const field=(k,label,ph,hint)=>`<label class="exf${errs[k]?' bad':''}"><span>${e(label)}</span><input data-exec="${k}" inputmode="decimal" autocomplete="off" value="${e(st[k]??'')}" placeholder="${e(ph)}"><small>${errs[k]?e(ERR[errs[k]]||'tidak valid')+' · ':''}${e(hint)}</small></label>`;
-    return `<details class="exec-form" data-exec-form${Object.keys(errs).length?' open':''}><summary><b>Pengaturan rencana siap salin</b><span class="muted small"> · modal ${st.capital?e(st.capital)+' USDT':'belum diisi'} · risiko ${e(st.riskPct||'')}%</span></summary>
+    const field=(k,label,ph,hint)=>`<label class="exf${errs[k]?' bad':''}"><span>${e(label)}</span><input data-exec="${k}" inputmode="decimal" autocomplete="off" value="${e(d[k]??'')}" placeholder="${e(ph)}"><small>${errs[k]?e(ERR[errs[k]]||'tidak valid')+' · ':''}${e(hint)}</small></label>`;
+    const badge=ex.dirty?'<span class="chip warn" data-save-badge="dirty">● belum disimpan</span>':saved?'<span class="chip primary" data-save-badge="saved">✓ tersimpan</span>':'<span class="chip warn" data-save-badge="none">belum ada</span>';
+    return `<details class="exec-form" data-exec-form${!saved||ex.dirty||ex.saveError||ex.justSaved?' open':''}><summary><b>Pengaturan rencana siap salin</b> ${badge}<span class="muted small"> ${saved?'modal '+e(ex.settings.capital)+' USDT · risiko '+e(ex.settings.riskPct)+'% · biaya '+e(ex.settings.costBps)+' bps':''}</span></summary>
       <div class="exf-grid">${field('capital','Modal alokasi (USDT)','mis. 1000','wajib, > 0')}${field('riskPct','Risiko per trade (%)','0.5','0,5 – 1')}${field('costBps','Biaya round-trip (bps)','18','0 – 50')}</div>
+      <div class="exf-actions"><button class="btn primary" data-action="save-exec">Simpan</button>${ex.dirty?'<button class="btn" data-action="cancel-exec">Batalkan</button>':''}</div>
+      ${ex.saveError?'<div class="save-st bad" data-save="invalid">⚠ Tidak disimpan: perbaiki isian yang ditandai merah.</div>':''}${execSaveStatus(ex)}
       <div class="muted small" style="margin-top:6px">Tersimpan hanya di browser ini · aturan pair Binance: ${e(rs)} · leverage dihitung otomatis per sinyal.</div></details>`;
   }
   const copyBtn=(val,label)=>`<button class="btn copy" data-action="copy-val" data-val="${e(val)}" aria-label="Salin ${e(label)}">Salin</button>`;
@@ -77,7 +88,7 @@
     const o=en.outcome||{code:'OPEN'},release=en.entryMs+LG.HOLD,s=en.scores;
     const oTxt=o.code==='OPEN'?`Berjalan · slot 24 jam lepas dalam ${L.durationShort(release-now)}`:`${LG.OUTCOME_TEXT[o.code]||o.code} ${L.time(o.atMs)}${fin(o.r)?' ('+(o.r>=0?'+':'')+o.r.toFixed(2)+'R)':''}`;
     return `<div class="dec-card ${e(en.side)}" data-dec="${e(en.key)}">
-      <div class="dec-head"><span class="run-tag"><span class="run-dot"></span>${o.code==='OPEN'?'RUNNING':'SELESAI'}</span><span class="dec-sym">${e(en.symbol.replace(/USDT$/,''))}</span>${en.rank?`<span class="muted small">#${en.rank}</span>`:''}${side(en.side)}<span class="chip neutral">${e(L.FAMILY[en.family]||en.family)}</span>${regimeChip(en.regime)}${en.source==='replay'?'<span class="chip neutral" title="Sinyal lampau yang pertama terlihat lewat replay">replay</span>':''}
+      <div class="dec-head"><span class="run-tag"><span class="run-dot"></span>${o.code==='OPEN'?'RUNNING':'SELESAI'}</span><span class="dec-sym">${e(en.symbol.replace(/USDT$/,''))}</span>${en.rank?`<span class="muted small">#${en.rank}</span>`:''}${side(en.side)}<span class="chip neutral">${e(L.FAMILY[en.family]||en.family)}</span>${regimeChip(en.regime)}
         <div class="dec-meta">keputusan ${e(L.time(en.decisionMs))} · ${e(L.date(en.decisionMs))}</div></div>
       <div class="dec-scores" data-locked="1"><div><span>M1 + M2q</span><b data-score="m1m2q">${sc(s.m1m2q,180)}</b></div><div><span>M6 (indeks)</span><b data-score="m6">${sc(s.m6,500)}</b></div><div><span>M1 Struktur</span><b>${sc(s.m1)}</b></div><div><span>M2 Kualitas</span><b>${sc(s.m2q)}</b></div><div class="lock" title="Skor dibekukan saat masuk Decision; refresh data tidak mengubahnya">🔒 skor dikunci</div></div>
       <div class="dec-price"><span class="px">${px>0?e(L.price(px)):'—'}</span><span class="rr ${fin(R)&&R>=0?'pos':'neg'}">${fin(R)?(R>=0?'+':'')+R.toFixed(2)+'R':'—'}</span></div>
@@ -141,22 +152,22 @@
     const stat=(k,label,v)=>`<div class="stat" data-jstat="${k}"><div class="k">${e(label)}</div><div class="v">${v}</div></div>`;
     let h=`<div class="section-head"><h2>Jurnal Sinyal</h2><button class="btn" data-action="download-journal">Unduh CSV (${rows.length})</button></div>
       <div class="filters">${sel('pair','Pair',uniq('symbol').map(s=>[s,s]))}${sel('side','Arah',[['LONG','LONG'],['SHORT','SHORT']])}${sel('family','Keluarga',uniq('family').map(s=>[s,L.FAMILY[s]||s]))}
-        ${sel('outcome','Hasil',[['TARGET_HIT','Kena TP'],['STOP_HIT','Kena SL'],['HORIZON_EXIT','Keluar 24 jam'],['NO_DATA','Data tidak ada']])}${sel('source','Sumber',[['live','Live'],['replay','Replay']])}
+        ${sel('outcome','Hasil',[['TARGET_HIT','Kena TP'],['STOP_HIT','Kena SL'],['HORIZON_EXIT','Keluar 24 jam'],['NO_DATA','Data tidak ada']])}
         <label>M6 min<input data-jf="m6min" inputmode="decimal" value="${e(f.m6min||'')}" placeholder="mis. 320"></label><label>M6 maks<input data-jf="m6max" inputmode="decimal" value="${e(f.m6max||'')}"></label></div>
       <div class="cards">${stat('n','Sinyal selesai',sm.n)}${stat('tp','Kena TP',sm.TARGET_HIT)}${stat('sl','Kena SL',sm.STOP_HIT)}${stat('hz','Keluar 24 jam',sm.HORIZON_EXIT)}${stat('avg','Rata-rata R',fin(sm.avgR)?(sm.avgR>=0?'+':'')+sm.avgR.toFixed(3):'—')}</div>`;
-    if(!rows.length)return h+'<div class="empty" data-empty="jurnal">Belum ada sinyal selesai untuk filter ini.</div>';
+    if(!rows.length)return h+`<div class="empty" data-empty="jurnal">${all.length?'Belum ada sinyal selesai untuk filter ini.':'Belum ada sinyal Decision yang selesai. Setiap pair yang masuk Decision dicatat otomatis di sini setelah hasilnya (TP / SL / 24 jam) diketahui.'}</div>`;
     h+=`<div class="table-wrap"><table class="journal"><thead><tr><th>Keputusan</th><th>Pair</th><th>Arah</th><th>Keluarga</th><th class="num">M1+M2q</th><th class="num">M6</th><th>Rezim BTC</th>
-      <th class="num">Entry</th><th class="num">SL</th><th class="num">TP</th><th>Hasil</th><th class="num">Keluar</th><th class="num">R</th><th>Sumber</th></tr></thead><tbody>`;
+      <th class="num">Entry</th><th class="num">SL</th><th class="num">TP</th><th>Hasil</th><th class="num">Keluar</th><th class="num">R</th></tr></thead><tbody>`;
     for(const r of rows.slice(0,300)){const o=r.outcome;
       h+=`<tr data-jrow="${e(r.key)}"><td class="small">${e(L.dateTime(r.decisionMs))}</td><td><b>${e(r.symbol)}</b>${r.rank?` <span class="muted small">#${r.rank}</span>`:''}</td><td>${side(r.side)}</td><td>${e(L.FAMILY[r.family]||r.family)}</td>
         <td class="num">${sc(r.scores.m1m2q)}</td><td class="num">${sc(r.scores.m6)}</td><td>${regimeChip(r.regime)||'—'}</td>
         <td class="num mono">${e(L.price(r.entry))}</td><td class="num mono">${e(L.price(r.stop))}</td><td class="num mono">${e(L.price(r.target))}</td>
         <td><span class="chip ${o.code==='TARGET_HIT'?'primary':o.code==='STOP_HIT'?'reject':'neutral'}">${e(LG.OUTCOME_TEXT[o.code]||o.code)}</span><div class="muted small">${e(L.time(o.atMs))}</div></td>
-        <td class="num mono">${e(L.price(o.exit))}</td><td class="num ${fin(o.r)?(o.r>=0?'pos':'neg'):''}">${fin(o.r)?(o.r>=0?'+':'')+o.r.toFixed(2):'—'}</td><td class="small">${e(r.source)}</td></tr>`;}
+        <td class="num mono">${e(L.price(o.exit))}</td><td class="num ${fin(o.r)?(o.r>=0?'pos':'neg'):''}">${fin(o.r)?(o.r>=0?'+':'')+o.r.toFixed(2):'—'}</td></tr>`;}
     h+='</tbody></table></div>';
     if(rows.length>300)h+=`<div class="muted small">300 terbaru ditampilkan; seluruh ${rows.length} baris ada di unduhan CSV.</div>`;
-    return h+'<div class="note" style="margin-top:10px">Hasil menurut candle 4H Binance dengan harga yang dibekukan saat Decision (stop dievaluasi lebih dahulu, horizon 24 jam) — bukan fill order akunmu. "replay" = sinyal lampau yang pertama terlihat lewat replay saat aplikasi dibuka.</div>';
+    return h+'<div class="note" style="margin-top:10px">Hasil menurut candle 4H Binance dengan harga yang dibekukan saat Decision (stop dievaluasi lebih dahulu, horizon 24 jam) — bukan fill order akunmu. Hanya sinyal yang benar-benar masuk Decision saat aplikasi berjalan yang dicatat.</div>';
   }
 
-  root.Malomo.ui={health,universeLine,regimeChip,execForm,execPanel,decisionCard,decisionList,decisionScreen,pairsRows,pairsScreen,journalScreen};
+  root.Malomo.ui={health,universeLine,regimeChip,execForm,execSaveStatus,execPanel,decisionCard,decisionList,decisionScreen,pairsRows,pairsScreen,journalScreen};
 })(globalThis);

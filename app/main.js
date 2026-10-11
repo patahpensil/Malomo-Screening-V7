@@ -10,7 +10,8 @@
   const app={state:null,loading:true,frozen:null,frozenJson:null,meta:{files:{},build:null},raw:{},failed:new Set(),cycleId:0,progress:null,
     universe:null,snap:null,eligible:null,ei:null,ledger:LG.empty(),
     view:{screen:'decision',pf:{structure:'',status:'',sort:'rank',q:''},jf:{pair:'',side:'',family:'',source:'',outcome:'',m6min:'',m6max:''}},timers:{},
-    exec:{settings:{capital:'',riskPct:String(X.DEFAULTS.riskPct),costBps:String(X.DEFAULTS.costBps)},rules:{},rulesAt:null,rulesError:null,rulesErrorAt:null,rulesLoading:false}};
+    exec:{settings:{capital:'',riskPct:String(X.DEFAULTS.riskPct),costBps:String(X.DEFAULTS.costBps)},draft:null,dirty:false,savedAt:null,saveError:false,justSaved:false,
+      rules:{},rulesAt:null,rulesError:null,rulesErrorAt:null,rulesLoading:false}};
   const transport=Tr.createTransport();
   const live=M.live.createLive({openInterest:s=>transport.openInterest(s)});
   let market=null;
@@ -223,21 +224,36 @@
       const act=ev.target.closest('[data-action]');if(!act)return;
       const a=act.dataset.action;
       if(a==='copy-val'){ev.stopPropagation();const txt=act.dataset.val||'';(navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject()).then(()=>{act.textContent='Tersalin';},()=>{act.textContent='Gagal';});return;}
+      // R36: pengaturan modal hanya berlaku setelah tombol Simpan ditekan dan nilainya sah.
+      if(a==='save-exec'){const ex=app.exec,v=X.validateSettings(ex.draft);
+        if(!v.ok){ex.saveError=true;render();return;}
+        ex.settings={capital:String(ex.draft.capital).trim(),riskPct:String(ex.draft.riskPct).trim(),costBps:String(ex.draft.costBps).trim()};
+        ex.savedAt=transport.serverNow();ex.dirty=false;ex.saveError=false;ex.justSaved=true;
+        store('exec',Object.assign({},ex.settings,{savedAt:ex.savedAt}));render();
+        const ok=store('exec');if(!ok||ok.capital!==ex.settings.capital){ex.justSaved=false;ex.storeFailed=true;render();}
+        return;}
+      if(a==='cancel-exec'){const ex=app.exec;ex.draft=Object.assign({},ex.settings);ex.dirty=false;ex.saveError=false;render();return;}
       if(a==='download-journal'){const rows=LG.filter(LG.finished(app.ledger),journalFilter());
         download('malomo_v7_jurnal_'+C.iso(transport.serverNow()).slice(0,10)+'.csv',LG.csv(rows),'text/csv;charset=utf-8');return;}
     });
     document.addEventListener('change',ev=>{
-      const x=ev.target.closest('[data-exec]');
-      if(x){const k=x.dataset.exec;if(!['capital','riskPct','costBps'].includes(k))return;app.exec.settings[k]=String(x.value).trim();store('exec',app.exec.settings);render();return;}
       const p=ev.target.closest('[data-pf]');if(p){app.view.pf[p.dataset.pf]=p.value;store('pf',app.view.pf);render();return;}
       const j=ev.target.closest('[data-jf]');if(j){app.view.jf[j.dataset.jf]=j.value;store('jf',app.view.jf);render();return;}
+    });
+    // Mengetik di form pengaturan hanya mengubah draf (belum dipakai) + menandai "Belum disimpan".
+    document.addEventListener('input',ev=>{
+      const x=ev.target.closest('[data-exec]');if(!x)return;const k=x.dataset.exec;if(!['capital','riskPct','costBps'].includes(k))return;
+      const ex=app.exec;ex.draft[k]=x.value;ex.dirty=['capital','riskPct','costBps'].some(f=>String(ex.draft[f]).trim()!==String(ex.settings[f]).trim());ex.justSaved=false;
+      const st=document.getElementById('exec-save-status');if(st)st.outerHTML=U.execSaveStatus(ex);
+      const b=document.querySelector('[data-save-badge]');if(b)b.outerHTML=ex.dirty?'<span class="chip warn" data-save-badge="dirty">● belum disimpan</span>':'<span class="chip primary" data-save-badge="saved">✓ tersimpan</span>';
     });
     document.addEventListener('visibilitychange',()=>{if(!document.hidden&&app.state&&Cy.lastClosedT(transport.serverNow())>app.state.T)runCycle();});
   }
 
   async function boot(){
     for(const [k,obj] of [['pf',app.view.pf],['jf',app.view.jf]]){const v=store(k);if(v&&typeof v==='object')for(const f of Object.keys(obj))if(typeof v[f]==='string')obj[f]=v[f];}
-    const xs=store('exec');if(xs&&typeof xs==='object')for(const k of ['capital','riskPct','costBps'])if(typeof xs[k]==='string')app.exec.settings[k]=xs[k];
+    const xs=store('exec');if(xs&&typeof xs==='object'){for(const k of ['capital','riskPct','costBps'])if(typeof xs[k]==='string')app.exec.settings[k]=xs[k];if(Number.isFinite(xs.savedAt))app.exec.savedAt=xs.savedAt;}
+    app.exec.draft=Object.assign({},app.exec.settings);
     app.ledger=LG.load(store('ledger'));
     bind();setScreen(location.hash.slice(1)||store('screen')||'decision');
     try{await loadStatic();}catch(err){app.error=err;app.loading=false;render();return;}

@@ -29,8 +29,15 @@ const UNIVERSE=UV.rank(Object.fromEntries(SYMS.map(s=>[s,DAILY_VOL[s]])));
 const CANDLES=Object.fromEntries(Object.entries(RAW).map(([s,r])=>[s,r.filter(k=>k[0]<=NOW).slice(-1500).map(Cy.toCandle)]));
 const expect=Cy.buildState({rawBySymbol:CANDLES,now:NOW,frozen:FROZEN,symbols:SYMS,gate:{fromMs:T,allowed:new Set(UNIVERSE.map(x=>x.symbol))}});
 const VIEW=Cy.toView(expect);
-const LEDGER=LG.freeze(LG.empty(),VIEW.history,{regimes:VIEW.regimes,ranks:Object.fromEntries(UNIVERSE.map(x=>[x.symbol,x.rank])),currentT:T,now:NOW}).ledger;
+// R36: jurnal hanya berisi sinyal yang masuk Decision saat aplikasi berjalan. Skenario utama: aplikasi dianggap sudah
+// terbuka di setiap close sebelumnya → SEED = ledger yang dibekukan close demi close (disimpan di localStorage sebelum dibuka).
+const RANKS=Object.fromEntries(UNIVERSE.map(x=>[x.symbol,x.rank]));
+const SEED=LG.empty();for(const t of [...new Set(VIEW.history.map(r=>Date.parse(r.decision_available_utc)))].filter(t=>t<T).sort((a,b)=>a-b))
+  LG.freeze(SEED,VIEW.history.filter(r=>Date.parse(r.decision_available_utc)===t),{regimes:VIEW.regimes,ranks:RANKS,currentT:t,now:t});
+const SEED_JSON=JSON.stringify(SEED);
+const LEDGER=LG.load(JSON.parse(SEED_JSON));LG.freeze(LEDGER,VIEW.history,{regimes:VIEW.regimes,ranks:RANKS,currentT:T,now:NOW});
 LG.resolve(LEDGER,CANDLES,NOW);
+const CURRENT=Object.values(LEDGER.entries).filter(e=>e.decisionMs===T);
 const ACTIVE=LG.active(LEDGER,NOW),FINISHED=LG.finished(LEDGER);
 const coreOnly=Cy.buildState({rawBySymbol:Object.fromEntries(C.PAIRS.map(s=>[s,RAW[s].filter(k=>k[0]<=NOW).slice(-1500).map(Cy.toCandle)])),now:NOW,frozen:FROZEN});
 
@@ -51,7 +58,7 @@ const server=http.createServer((req,res)=>{
   res.setHeader('Content-Type',TYPES[path.extname(f)]||'application/octet-stream');res.end(fs.readFileSync(f));
 });
 
-async function setup(browser,viewport,{failSymbol=null,noForming=false,eiFail=false,tickerFail=false}={}){
+async function setup(browser,viewport,{failSymbol=null,noForming=false,eiFail=false,tickerFail=false,seed=SEED_JSON}={}){
   const context=await browser.newContext({viewport,serviceWorkers:'block',acceptDownloads:true});
   const page=await context.newPage(),errors=[];
   page.on('pageerror',e=>errors.push('pageerror: '+e.message));
@@ -72,6 +79,7 @@ async function setup(browser,viewport,{failSymbol=null,noForming=false,eiFail=fa
       close(){if(this.readyState===3)return;this.readyState=3;clearTimeout(this._t);this.onclose&&this.onclose();}send(){}};
   },Object.fromEntries(Object.entries(RAW).map(([s,r])=>[s,r.find(k=>k[0]===T)[4]])));
   await page.addInitScript(v=>{window.__vol=v;},DAILY_VOL);
+  if(seed)await page.addInitScript(j=>{if(!localStorage.getItem('malomo_v7_ledger'))localStorage.setItem('malomo_v7_ledger',j);},seed);
   await page.route(/fonts\.(googleapis|gstatic)\.com/,r=>r.abort());
   await page.route('https://fapi.binance.com/**',async route=>{
     const u=new URL(route.request().url());
@@ -116,7 +124,7 @@ const nav=async(page,viewport,screen)=>{await page.locator((viewport.width<768?'
       const mob=viewport.width<768;
       const {context,page,errors}=await setup(browser,viewport);
       await run(`[${viewport.width}px] Decision: kartu = ledger engine (hard gate), skor dikunci tampil, status & universe`,async()=>{
-        await page.waitForSelector('#dec-list .dec-card',{timeout:30000});
+        await page.waitForFunction(()=>MalomoApp.app.state,null,{timeout:30000});await page.waitForSelector('#dec-list .dec-card',{timeout:30000});
         const keys=await page.locator('#dec-list .dec-card').evaluateAll(n=>n.map(x=>x.dataset.dec));
         assert.deepEqual(keys,ACTIVE.map(x=>x.key));
         for(let i=0;i<ACTIVE.length;i++){const en=ACTIVE[i],card=page.locator('#dec-list .dec-card').nth(i);
@@ -132,14 +140,26 @@ const nav=async(page,viewport,screen)=>{await page.locator((viewport.width<768?'
       });
       await run(`[${viewport.width}px] Rencana siap salin: isi modal → angka = exec engine, kelipatan tick, tersimpan`,async()=>{
         const f=page.locator('.exec-form');if(!(await f.evaluate(el=>el.open)))await f.locator('summary').click();
-        await f.locator('[data-exec="riskPct"]').fill(SET.riskPct);await f.locator('[data-exec="riskPct"]').press('Tab');
-        await page.locator('.exec-form [data-exec="capital"]').fill(SET.capital);await page.locator('.exec-form [data-exec="capital"]').press('Tab');
+        assert.equal(await page.locator('#exec-save-status').getAttribute('data-save'),'none');
+        // isian tidak sah → tidak disimpan, ditandai
+        await f.locator('[data-exec="capital"]').fill('-5');await page.locator('[data-action="save-exec"]').click();
+        assert.equal(await page.locator('[data-save="invalid"]').count(),1);assert.equal(await page.evaluate(()=>localStorage.getItem('malomo_v7_exec')),null);
+        await page.locator('.exec-form [data-exec="riskPct"]').fill(SET.riskPct);await page.locator('.exec-form [data-exec="capital"]').fill(SET.capital);
+        // diketik tetapi belum disimpan → status "Belum disimpan", rencana belum memakai isian
+        assert.equal(await page.locator('#exec-save-status').getAttribute('data-save'),'dirty');assert.equal(await page.locator('[data-save-badge]').getAttribute('data-save-badge'),'dirty');
+        assert.equal(await page.locator('#dec-list [data-exec-status="NEED_SETTINGS"]').count(),ACTIVE.length);
+        await page.locator('[data-action="save-exec"]').click();
+        assert.equal(await page.locator('#exec-save-status').getAttribute('data-save'),'saved');
+        assert((await page.locator('#exec-save-status').innerText()).includes('Tersimpan'));
+        assert.equal(JSON.parse(await page.evaluate(()=>localStorage.getItem('malomo_v7_exec'))).capital,SET.capital);
         await page.waitForSelector('#dec-list [data-exec-status="READY"],#dec-list [data-exec-status="NOT_EXECUTABLE"]',{timeout:10000});
         for(let i=0;i<ACTIVE.length;i++){const en=ACTIVE[i],pl=X.plan({symbol:en.symbol,side:en.side,entry:en.entry,stop:en.stop,target:en.target},SET,RULES[en.symbol]),card=page.locator('#dec-list .dec-card').nth(i);
           assert.equal(await card.locator('.exec').getAttribute('data-exec-status'),pl.status,en.symbol);if(pl.status!=='READY')continue;
           for(const k of ['entry','stop','target']){const v=await card.locator(`[data-exv="${k}"]`).innerText();assert.equal(v,pl.priceStr[k]);assert(isMultiple(v,TICK[en.symbol]));}
           assert.equal(await card.locator('[data-exv="qty"]').innerText(),pl.qtyStr);assert.equal(await card.locator('[data-exv="lev"]').innerText(),pl.leverage+'×');}
         await page.reload();await page.waitForSelector('#dec-list .dec-card');await page.waitForFunction(()=>MalomoApp.app.state,null,{timeout:30000});assert.equal(await page.locator('.exec-form [data-exec="capital"]').inputValue(),SET.capital);
+        assert.equal(await page.locator('#exec-save-status').getAttribute('data-save'),'saved','setelah reload tetap tersimpan');
+        assert.equal(await page.locator('[data-save-badge]').getAttribute('data-save-badge'),'saved','status simpan terlihat di judul form walau form tertutup');
       });
       await run(`[${viewport.width}px] Semua Pair: universe realtime, stablecoin/non-TRADING tersaring, M1 = engine, filter & urut`,async()=>{
         await nav(page,viewport,'pairs');await page.waitForSelector('#pairs-body tr[data-pair]');
@@ -179,7 +199,7 @@ const nav=async(page,viewport,screen)=>{await page.locator((viewport.width<768?'
     }
     await run('SKOR DIKUNCI: semua candle diubah lalu dihitung ulang → skor & harga Decision tidak berubah; ledger tersimpan setelah reload',async()=>{
       const {context,page,errors}=await setup(browser,{width:1280,height:900});
-      await page.waitForSelector('#dec-list .dec-card',{timeout:30000});
+      await page.waitForFunction(()=>MalomoApp.app.state,null,{timeout:30000});await page.waitForSelector('#dec-list .dec-card',{timeout:30000});
       const snap=()=>page.evaluate(()=>JSON.stringify(Object.values(MalomoApp.app.ledger.entries).map(e=>[e.key,e.scores,e.entry,e.stop,e.target,e.decisionMs])));
       const before=new Map(JSON.parse(await snap()).map(x=>[x[0],x]));
       const cardText=()=>page.locator('#dec-list .dec-card').evaluateAll(n=>Object.fromEntries(n.map(x=>[x.dataset.dec,x.querySelector('.dec-scores').innerText+' | '+x.querySelector('.dec-lv').innerText])));
@@ -196,8 +216,24 @@ const nav=async(page,viewport,screen)=>{await page.locator((viewport.width<768?'
       const stored=await page.evaluate(()=>Object.keys(JSON.parse(localStorage.getItem('malomo_v7_ledger')).entries).length);assert(stored>=ACTIVE.length,'ledger tersimpan '+stored);
       assert.deepEqual(errors,[]);await context.close();
     });
+    await run('R36 pertama dibuka (penyimpanan kosong): hanya Decision close berjalan yang tercatat, jurnal kosong (tanpa replay)',async()=>{
+      const {context,page,errors}=await setup(browser,{width:1280,height:900},{seed:null});
+      await page.waitForFunction(()=>MalomoApp.app.state,null,{timeout:30000});
+      const keys=await page.evaluate(()=>Object.keys(MalomoApp.app.ledger.entries).sort());
+      assert.deepEqual(keys,CURRENT.map(e=>e.key).sort());assert(keys.length>0);
+      await page.evaluate(()=>location.hash='jurnal');await page.waitForSelector('[data-empty="jurnal"]');
+      assert((await page.locator('[data-empty="jurnal"]').innerText()).includes('dicatat otomatis'));
+      assert.deepEqual(errors,[]);await context.close();
+    });
+    await run('R36 migrasi: entri "replay" dari versi sebelumnya dibuang dari jurnal saat dibuka',async()=>{
+      const old=JSON.parse(SEED_JSON);for(const e of Object.values(old.entries))e.source='replay';
+      const {context,page,errors}=await setup(browser,{width:1280,height:900},{seed:JSON.stringify(old)});
+      await page.waitForFunction(()=>MalomoApp.app.state,null,{timeout:30000});
+      assert.deepEqual(await page.evaluate(()=>Object.keys(MalomoApp.app.ledger.entries).sort()),CURRENT.map(e=>e.key).sort());
+      assert.deepEqual(errors,[]);await context.close();
+    });
     await run('FETCH_FAILED: pair penentu gagal → indikator kuning, tidak ada Decision baru di close ini',async()=>{
-      const {context,page,errors}=await setup(browser,{width:1280,height:900},{failSymbol:ACTIVE.find(x=>x.decisionMs===T).symbol});
+      const {context,page,errors}=await setup(browser,{width:1280,height:900},{failSymbol:CURRENT[0].symbol});
       await page.waitForFunction(()=>/FETCH_FAILED/.test(document.getElementById('health').innerText),null,{timeout:30000});
       await page.waitForFunction(()=>MalomoApp.app.state,null,{timeout:30000});
       assert.equal(await page.evaluate(T=>Object.values(MalomoApp.app.ledger.entries).filter(e=>e.decisionMs===T).length,T),0);

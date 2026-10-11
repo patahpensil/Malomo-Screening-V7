@@ -1,9 +1,10 @@
-/* Malomo V7 — Ledger Decision terkunci + Jurnal Sinyal (PRD v1.0.13 R35). Fungsi murni, tanpa DOM/jaringan.
-   - Setiap record ENTRY_CONSIDER dibekukan SEKALI saat pertama terlihat: skor M1–M6, harga entry/SL/TP, waktu, peringkat
-     volume, label rezim BTC. Refresh data, pergantian universe, atau replay ulang TIDAK pernah menimpanya.
+/* Malomo V7 — Ledger Decision terkunci + Jurnal Sinyal (PRD v1.0.13 R35; v1.0.14 R36). Fungsi murni, tanpa DOM/jaringan.
+   - HANYA sinyal yang benar-benar masuk Decision dicatat (R36): record ENTRY_CONSIDER pada close yang sedang berjalan saat
+     aplikasi menghitungnya. Sinyal masa lalu dari replay TIDAK dicatat (jurnal bukan backtest).
+   - Entri dibekukan SEKALI: skor M1–M6, harga entry/SL/TP, waktu, peringkat volume, label rezim BTC. Refresh data,
+     pergantian universe, atau replay ulang TIDAK pernah menimpanya.
    - Yang boleh berubah hanya hasil (outcome) selama masih berjalan: dihitung dari candle 4H yang sudah close dengan aturan
      PRD §6 (stop dievaluasi lebih dahulu, horizon 24 jam) memakai harga yang dibekukan.
-   - sumber 'live' = dibekukan pada siklus close-nya; 'replay' = sinyal masa lalu yang pertama kali terlihat lewat replay.
    Hasil adalah hasil sinyal menurut candle Binance, bukan fill order akun pengguna. */
 (function(root,factory){
   if(typeof module==='object'&&module.exports)module.exports=factory();
@@ -15,7 +16,8 @@
   const keyOf=r=>r.symbol+'|'+r.side+'|'+r.signal_family+'|'+r.decision_available_utc;
   const empty=()=>({version:VERSION,entries:{}});
 
-  /* Bekukan record ENTRY_CONSIDER yang belum ada. Entri yang sudah ada tidak disentuh sama sekali. */
+  /* Bekukan record ENTRY_CONSIDER close yang sedang berjalan (T = currentT) yang belum ada. Record close lain diabaikan;
+     entri yang sudah ada tidak disentuh sama sekali. */
   function freeze(ledger,records,{regimes={},ranks={},currentT,now}={}){
     const L=ledger&&ledger.entries?ledger:empty();const added=[];
     for(const r of records||[]){
@@ -23,7 +25,8 @@
       const k=keyOf(r);if(L.entries[k])continue;
       const s=r.scores||{},T=Date.parse(r.decision_available_utc),entryMs=Date.parse(r.entry_reference_time_utc);
       if(![T,entryMs,r.entry_reference_open,r.stop_price,r.target_price].every(fin))continue;
-      const e={key:k,symbol:r.symbol,side:r.side,family:r.signal_family,source:fin(currentT)&&T>=currentT?'live':'replay',
+      if(!fin(currentT)||T!==currentT)continue;   // R36: hanya Decision pada close berjalan
+      const e={key:k,symbol:r.symbol,side:r.side,family:r.signal_family,source:'live',
         decisionMs:T,entryMs,frozenAtMs:fin(now)?now:null,
         entry:r.entry_reference_open,stop:r.stop_price,target:r.target_price,rr:r.rr_target,atrEntry:r.atr_entry,
         invalidation:r.invalidation||null,structure:r.market_structure_direction||null,rank:fin(ranks[r.symbol])?ranks[r.symbol]:null,
@@ -74,7 +77,7 @@
     s.avgR=s.nR?s.sumR/s.nR:null;return s;
   }
   function filter(rows,f={}){
-    return rows.filter(e=>(!f.pair||e.symbol===f.pair)&&(!f.side||e.side===f.side)&&(!f.family||e.family===f.family)&&(!f.source||e.source===f.source)
+    return rows.filter(e=>(!f.pair||e.symbol===f.pair)&&(!f.side||e.side===f.side)&&(!f.family||e.family===f.family)
       &&(!f.outcome||e.outcome.code===f.outcome)&&(!fin(f.m6min)||(fin(e.scores.m6)&&e.scores.m6>=f.m6min))&&(!fin(f.m6max)||(fin(e.scores.m6)&&e.scores.m6<=f.m6max)));
   }
   function prune(L){
@@ -82,11 +85,12 @@
     ks.sort((a,b)=>L.entries[a].decisionMs-L.entries[b].decisionMs);
     for(const k of ks.slice(0,ks.length-MAX_ENTRIES))delete L.entries[k];
   }
-  /* Muat dari penyimpanan: hanya entri dengan bentuk sah yang diterima (data rusak dibuang, tidak diperbaiki). */
+  /* Muat dari penyimpanan: hanya entri sah yang benar-benar masuk Decision (source live) diterima; entri replay dari versi
+     1.0.13 dan data rusak dibuang, tidak diperbaiki. */
   function load(obj){
     const L=empty();if(!obj||obj.version!==VERSION||typeof obj.entries!=='object')return L;
     for(const [k,e] of Object.entries(obj.entries)){
-      if(e&&e.key===k&&typeof e.symbol==='string'&&['LONG','SHORT'].includes(e.side)&&[e.decisionMs,e.entryMs,e.entry,e.stop,e.target].every(fin)&&e.scores&&e.outcome)L.entries[k]=e;
+      if(e&&e.key===k&&e.source==='live'&&typeof e.symbol==='string'&&['LONG','SHORT'].includes(e.side)&&[e.decisionMs,e.entryMs,e.entry,e.stop,e.target].every(fin)&&e.scores&&e.outcome)L.entries[k]=e;
     }
     return L;
   }
@@ -99,7 +103,7 @@
   const num=(v,d)=>fin(v)?(d===undefined?String(v):v.toFixed(d)):'';
   const cell=v=>{const s=String(v??'');return /[",\n;]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;};
   const COLS=[['waktu_keputusan_utc',e=>isoUtc(e.decisionMs)],['waktu_keputusan_wita',e=>wita(e.decisionMs)],['pair',e=>e.symbol],['arah',e=>e.side],
-    ['keluarga',e=>e.family],['sumber',e=>e.source],['peringkat_volume',e=>e.rank??''],['rezim_btc',e=>e.regime?e.regime.code:''],['struktur_m1',e=>e.structure||''],
+    ['keluarga',e=>e.family],['peringkat_volume',e=>e.rank??''],['rezim_btc',e=>e.regime?e.regime.code:''],['struktur_m1',e=>e.structure||''],
     ['m1',e=>num(e.scores.m1,4)],['m2_kualitas',e=>num(e.scores.m2q,4)],['m1_plus_m2q',e=>num(e.scores.m1m2q,4)],['m2',e=>num(e.scores.m2,4)],['m3',e=>num(e.scores.m3,4)],
     ['m4',e=>num(e.scores.m4,4)],['m5',e=>num(e.scores.m5,4)],['m6',e=>num(e.scores.m6,4)],
     ['entry',e=>num(e.entry)],['sl',e=>num(e.stop)],['tp',e=>num(e.target)],['rr_target',e=>num(e.rr)],
