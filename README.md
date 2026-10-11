@@ -10,7 +10,7 @@ Spesifikasi riset **enam metodologi trading berbobot (M1–M5) dan M6 CONFLUENSE
 
 | Berkas | Fungsi |
 |---|---|
-| `PRD_FINAL_ENAM_METODOLOGI_M1_M6_CONFLUENSE_2026-10-10.md` | **Spesifikasi normatif tunggal** (v1.0.9-FINAL-DESIGN): rumus M1–M6, status tiga lapis, kontrak JSON, acceptance test, riwayat revisi |
+| `PRD_FINAL_ENAM_METODOLOGI_M1_M6_CONFLUENSE_2026-10-10.md` | **Spesifikasi normatif tunggal** (v1.0.10-FINAL-DESIGN): rumus M1–M6, status tiga lapis, kontrak JSON, acceptance test, riwayat revisi |
 | `LAPORAN_VALIDASI_PRD_FINAL_M1_M6_2026-10-10.md` | Batas bukti dan ringkasan verifikasi tiap revisi |
 | `verify_final_prd.py` | Verifier offline (Python 3 standar, tanpa dependensi) |
 | `VALIDASI_PRD_FINAL_M1_M6.json` | Hasil verifier terakhir |
@@ -116,6 +116,14 @@ node scripts/backtest/fetch-universe.js          # unduh data (butuh akses data.
 node scripts/backtest/run.js data/bt 30          # → results/tahap-a/summary.json, trades.csv.gz
 ```
 
+### Tahap A2 — riset generator baru (PRD §15)
+
+28 konfigurasi (Breakout/Pullback PRD dengan exit baru, Donchian, time-series momentum, kompresi volatilitas, momentum lintas-pair, funding kontrarian; masing-masing dengan/tanpa rezim BTC) diuji dengan protokol dan syarat lulus yang sama. **Tidak ada yang lulus.** Kandidat paling konsisten (Breakout PRD + rezim BTC) gagal uji ketahanan. Rekomendasi: belum untuk uang nyata; paper forward test lapis rezim BTC; aplikasi diposisikan sebagai alat bantu screening.
+
+```bash
+node scripts/backtest/a2.js data/bt 30           # → results/tahap-a2/summary.json
+```
+
 ## Hubungan dengan ICT Screening
 
 Batas adopsi dari [`patahpensil/ict-screening`](https://github.com/patahpensil/ict-screening) (disepakati 11 Okt 2026). Di luar dua hal pada tabel A dan B, semuanya mengikuti PRD.
@@ -160,6 +168,7 @@ Isi kartu berasal dari posisi simulasi `ENTRY_CONSIDER` (PRD §6), bukan dari tr
 | 3 | Enam layar referensi UI/UX, PWA, GitHub Pages bergerbang tes | Selesai (uji browser 20/20) |
 | — | Paritas OHLCV 2024 dari candle asli | Selesai (772/772 event + skor) |
 | A | Uji arsitektur: backtest komposit 30 pair likuid 2024–2026 + usulan perbaikan (PRD §14) | Selesai — belum ada edge signifikan |
+| A2 | Riset generator baru + rezim BTC, 28 konfigurasi (PRD §15) | Selesai — tidak ada yang lulus |
 
 ## Catatan bukti
 

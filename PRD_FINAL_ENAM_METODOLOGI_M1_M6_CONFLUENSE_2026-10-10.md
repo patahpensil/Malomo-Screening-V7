@@ -1,6 +1,6 @@
 # PRD FINAL — ENAM METODOLOGI TRADING BERBOBOT & M6 CONFLUENSE
 
-**Versi:** 1.0.9-FINAL-DESIGN (revisi konsistensi dokumen atas 1.0.0; lihat Riwayat revisi)  
+**Versi:** 1.0.10-FINAL-DESIGN (revisi konsistensi dokumen atas 1.0.0; lihat Riwayat revisi)  
 **Tanggal keputusan:** 10 Oktober 2026  
 **Bahasa spesifikasi:** Indonesia; nama field dan status Inggris untuk kontrak antar-agen.  
 **Ruang lingkup:** spesifikasi metodologi penelitian dan protokol keluaran agen; **bukan permintaan membuat aplikasi, mengirim order, commit, push, atau deploy**.  
@@ -23,6 +23,7 @@
 | 1.0.7 | 10 Okt 2026 | Audit menyeluruh: (R19) §0 butir 5 memakai kode resmi §9 (menghapus dua kode lama yang tidak terdaftar di §9). (R20) Definisi warmup indikator ewm (§1). (R21) `ENTRY_REVIEW` ditegaskan sebagai nama fase. (R22) Field JSON `atr_entry_frozen` diganti `atr_entry` + `atr_frozen`; contoh ditolak dilengkapi `equity_sim`/ATR (§10). (R23) Tabel pemetaan label CSV audit → kontrak PRD (§12.1). (R24) Label Spearman §12.1: mengukur `signal_generation_30`, bukan kualitas 80; train −0.054 berasal dari sampel 257. Rumus diverifikasi ulang 410/410 terhadap CSV kanonis (struktur, TE+ADX, grid vol20, generation Breakout, momentum, participation, grid ECDF k/258). | Konsistensi bahasa–kode; **tidak mengubah bobot, rumus skor, atau angka historis** |
 | 1.0.8 | 11 Okt 2026 | Paritas engine terhadap candle asli Binance 2024 dan jawaban audit generator arsip: (R25) Breakout — satu event aktif per (pair,side), event lama diselesaikan dulu lalu fresh cross dievaluasi pada candle sama, pivot boleh dipakai ulang setelah event selesai (§4.2). (R26) Pullback — satu setup aktif per (symbol,side), impuls baru tidak membuka setup kedua (§4.3). (R27) Reversal — syarat harga **dan** kronologi indeks pivot `l2<l1<h1` / `h2<h1<l1`, protected = `l1`/`h1` terbaru, satu event aktif per sisi, protected pivot tidak dipakai ulang (§4.4). (R28) Epsilon penyebut E4 mengikuti versi generator: Breakout v1 `+1e−12`, Pullback/Reversal v2 tanpa epsilon (§4.5). (R29) Tes engine I07–I09: regresi 11 Reversal terlarang, pakai ulang pivot Breakout, paritas 772/772 (§11). | Menyelaraskan PRD dengan generator arsip yang diuji; **tidak mengubah bobot, rumus skor, parameter, atau populasi event historis** |
 | 1.0.9 | 11 Okt 2026 | (R30) §14 baru: hasil Tahap A — uji arsitektur sistem (backtest komposit, ablation per lapis) atas 30 pair USDⓈ-M paling likuid, Feb 2024–Okt 2026, data asli Binance; temuan per lapis, usulan perbaikan (benahi/tambah/kurangi), dan kriteria lanjut ke Tahap B. | **Temuan dan usulan**, belum mengubah aturan normatif §1–§13; perubahan aturan hanya lewat revisi terpisah setelah disetujui pengguna |
+| 1.0.10 | 11 Okt 2026 | (R31) §15 baru: hasil Tahap A2 — riset generator sinyal baru dan lapis rezim BTC (28 konfigurasi dikunci sebelum hasil dilihat), uji ketahanan kandidat terbaik, kesimpulan, dan rekomendasi arah berikutnya. | **Temuan dan usulan**, belum mengubah aturan normatif §1–§13 |
 
 ## 0. Hirarki kewenangan dan larangan interpretasi
 
@@ -637,3 +638,83 @@ Diagnostik tambahan (sinyal lolos gerbang, per sinyal, 9 bps): kuintil M6 **tida
 ### 14.6 Kriteria lanjut ke Tahap B (uji forward)
 
 Arsitektur hasil revisi boleh masuk forward test dengan uang nyata hanya bila, dengan protokol §14.1 atas seluruh data 2024–2026 **dan biaya 18 bps + funding**: (1) R rata-rata per trade ≥ +0.05 dengan t ≥ 2.0; (2) positif di setiap tahun; (3) drawdown maksimum ≤ 25% ekuitas acuan pada risiko 1% per trade. Arsitektur v1.0.9 **belum memenuhi** ketiganya; Tahap B hanya boleh berupa **paper forward test** untuk pengumpulan data. Lulus kriteria ini pun **bukan** jaminan profit.
+
+## 15. Tahap A2 — Riset generator sinyal baru dan lapis rezim BTC (v1.0.10)
+
+**Sifat bagian ini:** catatan hasil riset dan usulan; aturan normatif §1–§13 tidak berubah.
+
+### 15.1 Desain (dikunci sebelum hasil dilihat)
+
+Data, universe 30 pair, periode (Feb 2024–Okt 2026), biaya, funding, dan ukuran posisi sama dengan §14.1. Tujuh keluarga hipotesis, masing-masing dua varian parameter, diuji **tanpa** dan **dengan** lapis rezim BTC (trade hanya bila searah label struktur M1 BTCUSDT pada close keputusan; label `TRANSITION` → tidak ada trade) = **28 konfigurasi**, semuanya dilaporkan:
+
+| Kode | Generator | Exit |
+|---|---|---|
+| H1a/b | Breakout–Retest §4.2 + gate arah M1 pair + aturan bentrok §9 | a: stop 1.5·ATR, 2R, 24 jam · b: trailing 3·ATR, maks 7 hari |
+| H2a/b | Pullback §4.3 + gate arah M1 pair + aturan bentrok §9 | sama dengan H1 |
+| H3a/b | Donchian: close menembus high/low 20 / 55 hari | stop 2·ATR; keluar saat close menembus kanal 10 / 20 hari |
+| H4a/b | Momentum deret waktu: arah = tanda return 30 / 60 hari, dievaluasi harian 00:00 UTC | stop 3·ATR; keluar saat tanda berbalik |
+| H5a/b | Kompresi volatilitas: NATR ≤ persentil 20% (120 candle) lalu close menembus range 20 candle | stop 1.5·ATR; target 2R / 3R; maks 72 jam |
+| H6a/b | Momentum lintas-pair mingguan (Senin 00:00 UTC): long 3 terkuat, short 3 terlemah menurut return 7 / 28 hari | stop 3·ATR; tahan 7 hari |
+| H7a/b | Funding kontrarian: funding ≥ +0.05% / +0.10% per 8 jam → short; ≤ −0.05% / −0.10% → long | stop 2·ATR; 24 / 72 jam |
+
+Dua cara evaluasi: (1) **per pair** (satu posisi per pair, tanpa batas jumlah pair) = edge mentah generator; (2) **portofolio mandat §6** (≤3 posisi, risiko 1%/trade, terbuka ≤3%, gross ≤1×). Syarat lulus = §14.6 (biaya 18 bps + funding: R ≥ +0.05 dengan t ≥ 2, positif setiap tahun, drawdown portofolio ≤ 25%).
+
+### 15.2 Hasil (biaya 18 bps + funding)
+
+| Kode | Konfigurasi | Rezim | n per pair | R per pair (t) | n portofolio | R portofolio (t) | Portofolio 2024 / 2025 / 2026 | DD | Lulus |
+|---|---|---|---:|---:|---:|---:|---|---:|:-:|
+| H1a | Breakout PRD, exit PRD | — | 2729 | −0.013 (−0.73) | 1708 | −0.013 (−0.55) | −0.037 / +0.001 / −0.003 | 58% | tidak |
+| H1b | Breakout PRD, trailing 3ATR ≤7 hari | — | 2217 | −0.048 (−1.19) | 787 | −0.055 (−0.88) | +0.015 / −0.086 / −0.095 | 93% | tidak |
+| H2a | Pullback PRD, exit PRD | — | 3739 | −0.034 (−2.12) | 1832 | +0.003 (0.13) | +0.058 / −0.021 / −0.026 | 62% | tidak |
+| H2b | Pullback PRD, trailing 3ATR ≤7 hari | — | 2720 | +0.009 (0.24) | 775 | −0.012 (−0.18) | +0.172 / −0.130 / −0.044 | 89% | tidak |
+| H3a | Donchian 20 hari, exit kanal 10 hari | — | 1314 | −0.018 (−0.18) | 263 | −0.115 (−0.66) | +0.048 / −0.314 / −0.068 | 51% | tidak |
+| H3b | Donchian 55 hari, exit kanal 20 hari | — | 641 | +0.030 (0.24) | 160 | +0.216 (0.63) | +0.826 / −0.378 / +0.212 | 33% | tidak |
+| H4a | TSMOM 30 hari, flip harian | — | 2879 | −0.031 (−0.76) | 159 | +0.065 (0.33) | +0.295 / +0.263 / −0.301 | 29% | tidak |
+| H4b | TSMOM 60 hari, flip harian | — | 2088 | +0.045 (0.75) | 122 | +0.007 (0.03) | +0.604 / +0.166 / −0.604 | 34% | tidak |
+| H5a | Squeeze, target 2R ≤72j | — | 2980 | +0.038 (1.53) | 912 | +0.061 (1.36) | +0.193 / +0.087 / −0.104 | 57% | tidak |
+| H5b | Squeeze, target 3R ≤72j | — | 2770 | +0.051 (1.72) | 806 | +0.068 (1.28) | +0.261 / +0.105 / −0.162 | 64% | tidak |
+| H6a | XS-momentum 7 hari, top/bottom 3, tahan 7 hari | — | 814 | −0.013 (−0.28) | 408 | −0.095 (−1.59) | +0.055 / −0.110 / −0.240 | 49% | tidak |
+| H6b | XS-momentum 28 hari, top/bottom 3, tahan 7 hari | — | 813 | +0.037 (0.77) | 408 | −0.024 (−0.35) | −0.032 / −0.029 / −0.008 | 31% | tidak |
+| H7a | Funding ±0.05%/8j kontrarian, 24j | — | 669 | −0.036 (−1.31) | 357 | −0.015 (−0.39) | −0.004 / −0.034 / −0.032 | 9% | tidak |
+| H7b | Funding ±0.10%/8j kontrarian, 72j | — | 103 | −0.034 (−0.34) | 74 | −0.032 (−0.24) | −0.083 / +0.226 / −0.033 | 9% | tidak |
+| H1a | Breakout PRD, exit PRD | searah BTC | 1391 | +0.014 (0.54) | 851 | +0.025 (0.73) | +0.002 / +0.031 / +0.047 | 32% | tidak |
+| H1b | Breakout PRD, trailing 3ATR ≤7 hari | searah BTC | 1209 | −0.068 (−1.31) | 510 | +0.007 (0.09) | +0.031 / −0.136 / +0.180 | 67% | tidak |
+| H2a | Pullback PRD, exit PRD | searah BTC | 1988 | −0.014 (−0.63) | 951 | +0.043 (1.31) | +0.112 / +0.018 / −0.003 | 34% | tidak |
+| H2b | Pullback PRD, trailing 3ATR ≤7 hari | searah BTC | 1655 | −0.055 (−1.17) | 555 | −0.028 (−0.36) | +0.185 / −0.193 / −0.055 | 73% | tidak |
+| H3a | Donchian 20 hari, exit kanal 10 hari | searah BTC | 837 | +0.003 (0.02) | 227 | −0.162 (−0.79) | −0.054 / −0.386 / −0.039 | 49% | tidak |
+| H3b | Donchian 55 hari, exit kanal 20 hari | searah BTC | 401 | −0.143 (−1.06) | 135 | −0.302 (−1.32) | +0.029 / −0.463 / −0.448 | 49% | tidak |
+| H4a | TSMOM 30 hari, flip harian | searah BTC | 1917 | +0.001 (0.03) | 145 | +0.408 (1.25) | +1.510 / −0.073 / −0.072 | 15% | tidak |
+| H4b | TSMOM 60 hari, flip harian | searah BTC | 1369 | +0.090 (1.14) | 110 | +0.185 (0.58) | +1.056 / +0.048 / −0.421 | 25% | tidak |
+| H5a | Squeeze, target 2R ≤72j | searah BTC | 1306 | +0.043 (1.16) | 457 | +0.031 (0.50) | +0.153 / +0.012 / −0.076 | 35% | tidak |
+| H5b | Squeeze, target 3R ≤72j | searah BTC | 1239 | +0.048 (1.09) | 412 | +0.045 (0.60) | +0.251 / +0.063 / −0.204 | 56% | tidak |
+| H6a | XS-momentum 7 hari, top/bottom 3, tahan 7 hari | searah BTC | 249 | −0.067 (−0.92) | 249 | −0.067 (−0.92) | −0.214 / −0.009 / +0.083 | 30% | tidak |
+| H6b | XS-momentum 28 hari, top/bottom 3, tahan 7 hari | searah BTC | 249 | +0.048 (0.59) | 249 | +0.048 (0.59) | −0.058 / +0.120 / +0.117 | 17% | tidak |
+| H7a | Funding ±0.05%/8j kontrarian, 24j | searah BTC | 186 | −0.092 (−1.75) | 107 | +0.022 (0.32) | +0.054 / −0.006 / −0.050 | 6% | tidak |
+| H7b | Funding ±0.10%/8j kontrarian, 72j | searah BTC | 43 | −0.069 (−0.45) | 25 | +0.023 (0.10) | −0.139 / −0.533 / +0.465 | 4% | tidak |
+
+**Tidak ada satu pun dari 28 konfigurasi yang lulus.** Pola yang konsisten: hampir semua keluarga pengikut tren dan breakout positif pada 2024 (BTC +121%), lalu melemah atau negatif pada 2025 (BTC −6%) dan 2026 (BTC −6% s.d. Okt). Label struktur BTC berada di `TRANSITION` 39% (2024), 45% (2025), dan 41% (2026) waktu.
+
+### 15.3 Kandidat paling konsisten dan uji ketahanannya
+
+H1a dengan lapis rezim BTC (generator Breakout PRD + gate arah pair + searah struktur BTC + exit PRD, tanpa ranking M6) adalah satu-satunya konfigurasi yang **positif di ketiga tahun pada evaluasi per pair maupun portofolio**, di biaya 9 bps (portofolio +0.049R, t 1.42) dan 18 bps (+0.025R, t 0.73). Uji ketahanan pada 18 bps:
+
+| Uji | Hasil |
+|---|---|
+| Biaya 25 bps | +0.007R (t 0.19); 2024 negatif |
+| Stop 1.0 / 2.0·ATR | −0.020R / +0.028R; tidak konsisten 3/3 |
+| Target 1.5R / 3R | +0.035R / +0.048R; target 3R negatif 2024 |
+| Horizon 12 / 48 jam | −0.016R / +0.008R |
+| Konsentrasi pair | Total +21.5% ekuitas acuan; DOGEUSDT (+12.3%) dan ORDIUSDT (+7.3%) menyumbang 91%; tanpa keduanya +2.0%; hanya 16 dari 30 pair positif |
+
+**Kesimpulan:** kandidat ini **tidak tahan** perubahan parameter tetangga, biaya, maupun penghapusan dua pair; tidak memenuhi §14.6.
+
+### 15.4 Kesimpulan Tahap A2 dan rekomendasi
+
+1. **Belum ditemukan edge yang memenuhi syarat** pada 4H untuk 30 pair USDⓈ-M paling likuid periode 2024–2026, baik dari generator PRD yang diperbaiki maupun dari enam keluarga generator baru. Penggunaan uang nyata (Tahap B dengan order sungguhan) **tidak direkomendasikan**.
+2. **Lapis rezim BTC** tetap satu-satunya komponen yang konsisten memperbaiki kestabilan antartahun (§14.3 D2–D4, §15.3) dan layak dibawa ke **paper forward test** bersama generator Breakout PRD tanpa ranking M6 — sebagai pengumpulan data, bukan sinyal trading.
+3. **Biaya eksekusi** menentukan: kandidat terbaik turun dari +0.049R (9 bps) ke +0.007R (25 bps). Eksekusi maker/limit adalah prasyarat bagi strategi apa pun di kelas ini.
+4. **Posisi aplikasi saat ini** sebaiknya dinyatakan sebagai **alat bantu screening dan analisis** (menyaring setup, struktur, risiko, dan konteks pasar untuk keputusan manusia), bukan generator sinyal otomatis.
+5. **Arah riset berikutnya** (masing-masing wajib protokol §14.1 dan hipotesis dikunci lebih dulu): (a) strategi untuk rezim `TRANSITION`/range, karena 40–45% waktu pasar berada di rezim ini dan semua generator tren gagal di sana; (b) timeframe harian dengan universe yang sama untuk menambah horizon dan menurunkan porsi biaya per trade; (c) memperpanjang data ke 2022–2023 bila arsip tersedia, untuk menambah siklus pasar.
+6. **Peringatan uji berganda:** 28 konfigurasi diuji. Hasil positif tunggal (mis. t ≈ 2 pada satu tahun) wajar muncul secara kebetulan dan tidak boleh dijadikan dasar keputusan tanpa konsistensi antartahun dan uji ketahanan.
+
+**Reproduksi:** `node scripts/backtest/a2.js <data/bt> 30` → `results/tahap-a2/summary.json`.
