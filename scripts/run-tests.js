@@ -10,6 +10,7 @@ const SUITES=[
   {name:'Rencana siap salin R32 + rezim BTC R33',cmd:'node',args:['scripts/test-exec.js']},
   {name:'Universe 100 pair R34/R35 + invarian skor',cmd:'node',args:['scripts/test-universe.js']},
   {name:'Ledger Decision terkunci + Jurnal R35',cmd:'node',args:['scripts/test-ledger.js']},
+  {name:'Posisi nyata R38 (Saya ambil, manual, panel risiko)',cmd:'node',args:['scripts/test-portfolio.js']},
   {name:'Verifier PRD (Python)',cmd:'python3',args:['verify_final_prd.py'],json:true},
 ];
 const out=[];let failed=false;

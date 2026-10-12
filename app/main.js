@@ -4,12 +4,12 @@
    Decision terkunci (R35) — semuanya hanya di browser ini. */
 (function(root){
   'use strict';
-  const M=root.Malomo,C=M.core,Cy=M.cycle,U=M.ui,L=M.labels,Tr=M.transport,X=M.exec,UV=M.universe,LG=M.ledger;
+  const M=root.Malomo,C=M.core,Cy=M.cycle,U=M.ui,L=M.labels,Tr=M.transport,X=M.exec,UV=M.universe,LG=M.ledger,PF=M.portfolio;
   const $=id=>document.getElementById(id);
   const SCREENS=['decision','pairs','jurnal'];
   const app={state:null,loading:true,frozen:null,frozenJson:null,meta:{files:{},build:null},raw:{},failed:new Set(),cycleId:0,progress:null,
-    universe:null,snap:null,eligible:null,ei:null,ledger:LG.empty(),
-    view:{screen:'decision',pf:{structure:'',status:'',sort:'rank',q:''},jf:{pair:'',side:'',family:'',source:'',outcome:'',m6min:'',m6max:''}},timers:{},
+    universe:null,snap:null,eligible:null,ei:null,ledger:LG.empty(),manual:PF.emptyManual(),
+    view:{screen:'decision',pf:{structure:'',status:'',sort:'rank',q:''},jf:{pair:'',side:'',family:'',taken:'',outcome:'',m6min:'',m6max:''},sheet:null},timers:{},
     exec:{settings:{capital:'',riskPct:String(X.DEFAULTS.riskPct),costBps:String(X.DEFAULTS.costBps)},draft:null,dirty:false,savedAt:null,saveError:false,justSaved:false,
       rules:{},rulesAt:null,rulesError:null,rulesErrorAt:null,rulesLoading:false}};
   const transport=Tr.createTransport();
@@ -100,7 +100,8 @@
   // Pair sinyal yang slotnya masih berjalan ATAU hasilnya belum final (≤ 48 jam) tetap diunduh, supaya hasil jurnal
   // tidak berubah menjadi NO_DATA hanya karena pair keluar dari 100 besar volume atau aplikasi lama tidak dibuka.
   const carrySymbols=()=>{const now=transport.serverNow();return [...new Set([...LG.active(app.ledger,now),...LG.unresolved(app.ledger,now)].map(e=>e.symbol))];};
-  const relevant=()=>new Set([...snapSymbols(),...C.PAIRS,...carrySymbols()]);   // pair yang menentukan keputusan close ini
+  const manualSymbols=()=>PF.openManual(app.manual).map(p=>p.symbol);   // R38: candle pair posisi manual (hanya untuk hasil, bukan skor)
+  const relevant=()=>new Set([...snapSymbols(),...C.PAIRS,...carrySymbols(),...manualSymbols()]);   // pair yang menentukan keputusan close ini
 
   // Pair yang baru masuk 100 besar di tengah siklus: candle diunduh di latar; ikut keputusan mulai close berikutnya.
   const bg={queue:new Set(),busy:false};
@@ -136,6 +137,7 @@
       const ranks={};for(const x of (app.snap?app.snap.list:[]))if(Number.isInteger(x.rank))ranks[x.symbol]=x.rank;
       LG.freeze(app.ledger,st.history,{regimes:st.regimes||{},ranks,currentT:st.T,now});
       LG.resolve(app.ledger,app.raw,now);store('ledger',app.ledger);
+      if(PF.resolveManual(app.manual,app.raw,now).length)store('manual',app.manual);
     }else app.error=err;
     app.loading=false;
     live.sync(LG.active(app.ledger,transport.serverNow()).map(e=>e.symbol));live.pollOI();
@@ -186,7 +188,10 @@
     render();$('content').focus({preventScroll:true});
   }
   const liveView=()=>({prices:market?market.prices:{},data:live.data,cvd5:live.cvd5});
-  function ctx(){return {app,state:app.state,ledger:app.ledger,now:transport.serverNow(),live:liveView(),ex:app.exec,market:market?market.tickers:{}};}
+  function ctx(){return {app,state:app.state,ledger:app.ledger,manual:app.manual,now:transport.serverNow(),live:liveView(),ex:app.exec,market:market?market.tickers:{}};}
+  // R38: lembar isian dirender HANYA saat dibuka/ditutup/error (bukan tiap detik) supaya isian tidak terhapus.
+  function renderSheet(){const el=$('sheet');if(!el)return;el.innerHTML=U.sheet(ctx(),app.view.sheet);el.hidden=!app.view.sheet;if(app.view.sheet){const f=el.querySelector('input');if(f)f.focus();}}
+  const sheetVals=()=>{const o={};document.querySelectorAll('#sheet [data-sh]').forEach(x=>{o[x.dataset.sh]=x.value;});return o;};
   function render(){
     const st=app.state,c=ctx();
     $('health').innerHTML=app.progress&&!st?`<span class="dot neutral"></span><span>${L.esc(app.progress)}</span>`:!st&&app.failed.size?`<span class="dot warn"></span><span>Mengambil ulang (FETCH_FAILED): ${L.esc([...app.failed].join(', '))}</span>`:U.health(st,app.loading);
@@ -207,7 +212,7 @@
   function tick(){
     tickClock();live.tick();if(market)market.watchdog();
     const now=transport.serverNow();
-    if(app.view.screen==='decision'&&app.state){const el=$('dec-list');if(el)el.innerHTML=U.decisionList(ctx());}
+    if(app.view.screen==='decision'&&app.state){const el=$('dec-list');if(el)el.innerHTML=U.decisionList(ctx());const mn=$('man-list');if(mn)mn.innerHTML=U.manualList(ctx());}
     // Universe realtime: ranking ulang tiap 5 detik dari stream; pair baru diunduh di latar.
     if(now-lastUniverse>5000&&app.eligible&&market&&app.state){lastUniverse=now;if(computeUniverse()){$('universe').innerHTML=U.universeLine(app.universe,app.snap);syncBackground();}}
     if(app.view.screen==='pairs'&&app.state&&now-lastPairsRender>5000){lastPairsRender=now;const el=$('pairs-body');if(el)el.innerHTML=U.pairsRows(ctx(),app.view.pf);}
@@ -225,6 +230,7 @@
     document.addEventListener('click',ev=>{
       const act=ev.target.closest('[data-action]');if(!act)return;
       const a=act.dataset.action;
+      if(a==='pair'){ev.preventDefault();return;}   // detail pair (menunggu persetujuan rancangan) — tautan tidak berpindah layar
       if(a==='copy-val'){ev.stopPropagation();const txt=act.dataset.val||'';(navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject()).then(()=>{act.textContent='Tersalin';},()=>{act.textContent='Gagal';});return;}
       // R36: pengaturan modal hanya berlaku setelah tombol Simpan ditekan dan nilainya sah.
       if(a==='save-exec'){const ex=app.exec,v=X.validateSettings(ex.draft);
@@ -235,8 +241,33 @@
         const ok=store('exec');if(!ok||ok.capital!==ex.settings.capital){ex.justSaved=false;ex.storeFailed=true;render();}
         return;}
       if(a==='cancel-exec'){const ex=app.exec;ex.draft=Object.assign({},ex.settings);ex.dirty=false;ex.saveError=false;render();return;}
+      // ---------- R38 Saya ambil / posisi manual ----------
+      if(a==='take-open'){const en=app.ledger.entries[act.dataset.key];if(!en)return;
+        const pl=X.plan({symbol:en.symbol,side:en.side,entry:en.entry,stop:en.stop,target:en.target,target2:en.target2,tp1Frac:en.tp1Frac},app.exec.settings,app.exec.rules[en.symbol]||null);
+        app.view.sheet={type:'take',key:en.key,errors:{},prefill:{entry:pl.priceStr?pl.priceStr.entry:String(en.entry),qty:pl.qtyStr||(Number.isFinite(pl.qty)?String(+pl.qty.toPrecision(8)):'')}};renderSheet();return;}
+      if(a==='take-save'){const sh=app.view.sheet,v=sheetVals(),r=PF.take(app.ledger,sh.key,{entry:v.entry,qty:v.qty,now:transport.serverNow()});
+        if(!r.ok){sh.errors=r.errors;sh.prefill=v;renderSheet();return;}
+        store('ledger',app.ledger);app.view.sheet=null;renderSheet();render();return;}
+      if(a==='untake'){if(!confirm('Batalkan tanda "Diambil" untuk posisi ini?'))return;if(PF.untake(app.ledger,act.dataset.key)){store('ledger',app.ledger);render();}return;}
+      if(a==='man-open'){app.view.sheet={type:'manual',errors:{},prefill:{}};renderSheet();return;}
+      if(a==='man-save'){const sh=app.view.sheet,v=sheetVals(),cap=X.validateSettings(app.exec.settings);
+        const r=PF.addManual(app.manual,v,{now:transport.serverNow(),capital:cap.ok?cap.capital:null});
+        if(!r.ok){sh.errors=r.errors;sh.prefill=v;renderSheet();return;}
+        store('manual',app.manual);app.view.sheet=null;renderSheet();
+        const sym=app.manual.positions[r.id].symbol;if(!app.raw[sym]){bg.queue.add(sym);pumpBackground();}
+        render();return;}
+      if(a==='man-close-open'){const p=app.manual.positions[act.dataset.id];if(!p)return;const t=market&&market.tickers[p.symbol];
+        app.view.sheet={type:'close',id:p.id,errors:{},prefill:{exit:t&&t.price>0?String(t.price):''}};renderSheet();return;}
+      if(a==='man-close-save'){const sh=app.view.sheet,v=sheetVals(),r=PF.closeManual(app.manual,sh.id,{exit:v.exit,now:transport.serverNow()});
+        if(!r.ok){sh.errors=r.errors;sh.prefill=v;renderSheet();return;}
+        store('manual',app.manual);app.view.sheet=null;renderSheet();render();return;}
+      if(a==='man-delete'){if(!confirm('Hapus posisi manual ini? (untuk salah input)'))return;if(PF.removeManual(app.manual,act.dataset.id)){store('manual',app.manual);render();}return;}
+      if(a==='sheet-cancel'){app.view.sheet=null;renderSheet();return;}
+      if(a==='download-manual'){const cost=X.validateSettings(app.exec.settings);
+        download('malomo_v7_manual_'+C.iso(transport.serverNow()).slice(0,10)+'.csv',PF.csvManual(PF.closedManual(app.manual),{costBps:cost.ok?cost.costBps:X.DEFAULTS.costBps}),'text/csv;charset=utf-8');return;}
       if(a==='download-journal'){const rows=LG.filter(LG.finished(app.ledger),journalFilter());
-        download('malomo_v7_jurnal_'+C.iso(transport.serverNow()).slice(0,10)+'.csv',LG.csv(rows),'text/csv;charset=utf-8');return;}
+        const cs=X.validateSettings(app.exec.settings),cost=cs.ok?cs.costBps:X.DEFAULTS.costBps;
+        download('malomo_v7_jurnal_'+C.iso(transport.serverNow()).slice(0,10)+'.csv',LG.csv(rows,{pnl:e=>PF.pnl(PF.fromTaken(e),cost)}),'text/csv;charset=utf-8');return;}
     });
     document.addEventListener('change',ev=>{
       const p=ev.target.closest('[data-pf]');if(p){app.view.pf[p.dataset.pf]=p.value;store('pf',app.view.pf);render();return;}
@@ -249,6 +280,7 @@
       const st=document.getElementById('exec-save-status');if(st)st.outerHTML=U.execSaveStatus(ex);
       const b=document.querySelector('[data-save-badge]');if(b)b.outerHTML=ex.dirty?'<span class="chip warn" data-save-badge="dirty">● belum disimpan</span>':'<span class="chip primary" data-save-badge="saved">✓ tersimpan</span>';
     });
+    document.addEventListener('keydown',ev=>{if(ev.key==='Escape'&&app.view.sheet){app.view.sheet=null;renderSheet();}});
     document.addEventListener('visibilitychange',()=>{if(!document.hidden&&app.state&&Cy.lastClosedT(transport.serverNow())>app.state.T)runCycle();});
   }
 
@@ -256,7 +288,7 @@
     for(const [k,obj] of [['pf',app.view.pf],['jf',app.view.jf]]){const v=store(k);if(v&&typeof v==='object')for(const f of Object.keys(obj))if(typeof v[f]==='string')obj[f]=v[f];}
     const xs=store('exec');if(xs&&typeof xs==='object'){for(const k of ['capital','riskPct','costBps'])if(typeof xs[k]==='string')app.exec.settings[k]=xs[k];if(Number.isFinite(xs.savedAt))app.exec.savedAt=xs.savedAt;}
     app.exec.draft=Object.assign({},app.exec.settings);
-    app.ledger=LG.load(store('ledger'));
+    app.ledger=LG.load(store('ledger'));app.manual=PF.loadManual(store('manual'));
     bind();setScreen(location.hash.slice(1)||store('screen')||'decision');
     try{await loadStatic();}catch(err){app.error=err;app.loading=false;render();return;}
     initWorker();
@@ -266,6 +298,6 @@
     await runCycle();
     if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('sw.js').catch(()=>{});
   }
-  root.MalomoApp={app,rebuildNow,runCycle,render,transport,live,journalFilter,get ticker(){return market;},get market(){return market;}};
+  root.MalomoApp={app,renderSheet,rebuildNow,runCycle,render,transport,live,journalFilter,get ticker(){return market;},get market(){return market;}};
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
 })(globalThis);

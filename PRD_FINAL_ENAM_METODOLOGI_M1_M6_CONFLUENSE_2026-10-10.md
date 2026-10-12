@@ -1,6 +1,6 @@
 # PRD FINAL — ENAM METODOLOGI TRADING BERBOBOT & M6 CONFLUENSE
 
-**Versi:** 1.0.15-FINAL-DESIGN (revisi konsistensi dokumen atas 1.0.0; lihat Riwayat revisi)  
+**Versi:** 1.0.16-FINAL-DESIGN (revisi konsistensi dokumen atas 1.0.0; lihat Riwayat revisi)  
 **Tanggal keputusan:** 10 Oktober 2026  
 **Bahasa spesifikasi:** Indonesia; nama field dan status Inggris untuk kontrak antar-agen.  
 **Ruang lingkup:** spesifikasi metodologi penelitian dan protokol keluaran agen; **bukan permintaan membuat aplikasi, mengirim order, commit, push, atau deploy**.  
@@ -29,6 +29,7 @@
 | 1.0.13 | 12 Okt 2026 | §18 baru, keputusan pengguna (Tahap 1): (R35) aplikasi menjadi tiga layar — **Decision** (hard gate = status layak dipertimbangkan, skor dikunci saat masuk), **Semua Pair** (universe realtime + M1 per pair), **Jurnal Sinyal** (hasil SL/TP/horizon + unduh CSV); universe 100 pair kini **realtime** dari volume 24 jam berjalan (stream publik), gate keputusan memakai snapshot universe pada close 4H; layar riset lama, inspektor, dan unduh log audit dihapus. Perbaikan: pair penentu yang gagal diunduh sejak percobaan pertama kini tetap menahan keputusan (§1). | **Lapisan tampilan & cakupan data**; rumus dan bobot M1–M6, generator, gate keputusan, kontrak §10, dan portofolio §6 tidak berubah. Referensi UI/UX enam layar digantikan §18 |
 | 1.0.14 | 12 Okt 2026 | Koreksi pengguna atas §18: (R36) Jurnal hanya mencatat sinyal yang **benar-benar masuk Decision** pada close berjalan saat aplikasi aktif — sinyal masa lalu dari replay tidak dicatat dan entri replay versi 1.0.13 dibuang saat dimuat; pengaturan modal/risiko/biaya hanya berlaku setelah tombol **Simpan** ditekan, dengan status tersimpan/belum disimpan yang selalu terlihat. | Lapisan tampilan; rumus dan bobot tidak berubah |
 | 1.0.15 | 12 Okt 2026 | §19 baru, keputusan pengguna untuk penggunaan uang nyata: (R37) **mandat risiko LIVE** aplikasi — maksimal **10 posisi** bersamaan, risiko **1% per trade**, risiko terbuka ≤ **10%**, **batas notional (gross) dihapus**, exit **TP1 = 2R (tutup 50%) + TP2 = 3R (sisa 50%)**, SL tetap di tempat setelah TP1, horizon 24 jam tetap; panel risiko portofolio (peringatan saja); rencana siap salin menampilkan TP1/TP2 dengan qty dibagi; perbaikan hasil jurnal (data yang belum terunduh tidak lagi menjadi "data tidak ada"). Mandat riset §6 tetap dipakai untuk reproduksi riset. Hasil uji data asli 2024–2026 dicatat apa adanya (§19.2), termasuk bahwa 10 posisi lebih buruk daripada 3 posisi dalam backtest. | **Bobot, rumus skor M1–M6, rumus M4, gate, dan ranking TIDAK berubah** (diuji: skor identik di kedua mandat) |
+| 1.0.16 | 12 Okt 2026 | §20 baru, keputusan pengguna: (R38) **posisi nyata pengguna** — tombol **Saya ambil** di kartu Decision (harga entry & qty yang benar-benar terisi; batal ambil), **posisi manual** di luar sinyal Malomo (tanpa skor; hasil otomatis dari candle 4H atau ditutup sendiri), panel risiko kini dihitung dari posisi nyata (diambil + manual) dengan baris pembanding semua sinyal, jurnal mendapat filter/kolom Diambil dan tabel posisi manual terpisah + CSV. | Catatan pengguna; **bobot, rumus skor, gate, ranking, harga & hasil sinyal TIDAK berubah** |
 
 ## 0. Hirarki kewenangan dan larangan interpretasi
 
@@ -932,3 +933,57 @@ Verifikasi engine aplikasi atas data yang sama:
 - kartu menampilkan TP1/TP2;
 - rencana TP1/TP2 = engine;
 - panel risiko = hitungan independen dari jurnal, untuk risiko default dan risiko tersimpan.
+
+## 20. Posisi nyata pengguna: Saya ambil, posisi manual, panel risiko (v1.0.16)
+
+Keputusan pengguna 12 Oktober 2026. Aplikasi tetap tanpa API key dan tanpa order, sehingga tidak bisa melihat akun Binance. Semua data di bagian ini adalah **catatan yang diisi pengguna**. Bagian ini tidak mengubah bobot, rumus skor M1–M6, gate, ranking, harga sinyal, maupun hasil sinyal di jurnal.
+
+### 20.1 R38 — Saya ambil
+
+1. Setiap kartu Decision punya tombol **Saya ambil**. Lembar isian terisi otomatis dari rencana siap salin (entry dan qty yang sudah dibulatkan). Pengguna mengubahnya bila order terisi di harga atau qty lain. Syarat: entry > 0 dan qty > 0, dan entry tidak boleh sudah melewati SL.
+2. Yang disimpan hanya field tambahan `taken` = {waktu, entry, qty} pada entri jurnal. SL, TP1, TP2, skor, dan hasil sinyal tetap dari sinyal yang dibekukan. **Batal ambil** menghapus field itu.
+3. Untung/rugi posisi diambil, dalam USDT, dihitung untuk setiap bagian qty: (harga keluar sinyal − entry aktual) × qty × arah, dengan TP1/TP2 mengikuti §19, lalu dikurangi biaya bps × notional entry sebagai perkiraan. Hasil "data tidak ada" tidak ditebak.
+
+### 20.2 R38 — Posisi manual
+
+1. Isian: pair (USDT perpetual), arah, entry, SL, TP1 opsional, TP2 opsional (butuh TP1; pembagian 50/50), dan qty. Bila qty kosong, qty dihitung dari risiko% × modal tersimpan ÷ jarak SL. SL dan TP wajib di sisi yang benar.
+2. Posisi manual **tidak punya skor** dan diberi label MANUAL.
+3. Hasil otomatis dihitung dari candle 4H yang sudah close, **mulai candle pertama yang dibuka setelah posisi dicatat**. Candle tempat posisi dibuka diabaikan karena high/low-nya bisa terjadi sebelum entry. Aturannya: SL dievaluasi lebih dahulu, lalu TP1/TP2, dan SL tetap di tempat setelah TP1. **Tidak ada horizon 24 jam.**
+4. Posisi bisa **ditutup sendiri**: sisa qty keluar pada harga yang diisi, defaultnya harga terakhir. **Hapus** dipakai untuk salah input.
+5. Candle pair posisi manual tetap diunduh selama posisi terbuka, hanya untuk menghitung hasil. Pair itu tidak ikut gate atau skor.
+
+### 20.3 Panel risiko dan jurnal
+
+1. Panel risiko (§19.1 butir 5) kini dihitung dari **posisi nyata**, yaitu posisi diambil yang masih terbuka ditambah posisi manual:
+   - posisi terbuka / 10;
+   - risiko terbuka = Σ qty yang masih menanggung SL × jarak entry–SL (setengah qty setelah TP1), dalam USDT dan % modal tersimpan;
+   - drawdown dari puncak dan hasil kumulatif dari posisi nyata yang sudah selesai, dalam USDT dan % modal, tanpa kompaun.
+   
+   Tanpa modal tersimpan, angka persen tampil "—" disertai peringatan. Baris **pembanding** menampilkan angka semua sinyal Malomo seperti di §19, dengan anggapan semuanya diambil. Panel tetap hanya peringatan.
+2. Jurnal mendapat:
+   - filter **Diambil** (ya/tidak), kolom Diambil beserta hasil USDT, dan kartu ringkasan "Diambil · hasil";
+   - kolom CSV `diambil`, `entry_aktual`, `qty_aktual`, `pnl_usdt_perkiraan`.
+   
+   Posisi manual yang selesai tampil di tabel terpisah **Posisi manual selesai** dengan CSV sendiri. Tabel ini **tidak dicampur** ke statistik sinyal Malomo.
+3. Penyimpanan ada di browser perangkat ini: entri jurnal di `malomo_v7_ledger` dan posisi manual di `malomo_v7_manual`.
+
+### 20.4 Tes
+
+`scripts/test-portfolio.js`:
+- Saya ambil: validasi, hanya field `taken` yang bertambah, muat ulang, batal;
+- untung/rugi USDT (SL, TP1 lalu SL, TP1+TP2, biaya, data tidak ada);
+- validasi posisi manual;
+- hasil otomatis (candle pembukaan diabaikan, tanpa horizon, TP1 dan TP2 pada candle sama);
+- tutup sendiri, hapus, muat ulang aman, CSV;
+- angka panel dari posisi nyata;
+- filter dan kolom CSV jurnal.
+
+`scripts/test-browser.js`, desktop dan mobile:
+- lembar isian Saya ambil terisi dari rencana; qty 0 ditolak; isian tidak terhapus oleh pembaruan per detik;
+- tanda Diambil tersimpan;
+- angka panel;
+- posisi manual dengan SL di sisi salah ditolak, lalu posisi yang sah;
+- panel menghitung 2 posisi;
+- tutup sendiri: hasil USDT, jurnal manual, CSV;
+- filter Diambil;
+- batal ambil.

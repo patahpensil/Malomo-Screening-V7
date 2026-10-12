@@ -3,7 +3,7 @@
    Aturan UI: tanpa tombol order; M6 selalu indeks (bukan win rate); null tampil "—"; arah = teks + ikon; waktu UTC + WITA. */
 (function(root){
   'use strict';
-  const M=root.Malomo,L=M.labels,X=M.exec,LG=M.ledger;
+  const M=root.Malomo,L=M.labels,X=M.exec,LG=M.ledger,PF=M.portfolio;
   const e=L.esc;
   const fin=x=>typeof x==='number'&&Number.isFinite(x);
   const side=s=>`<span class="side ${e(s)}">${e(L.sideText(s))}</span>`;
@@ -90,19 +90,74 @@
     const longs=open.filter(x=>x.side==='LONG').length;
     return {positions:act.length,open:open.length,longs,shorts:open.length-longs,openRiskPct:openRisk,cumPct:cum,ddPct:peak-cum,trades:done.length,riskPct};
   }
+  const savedSettings=c=>{const sv=X.validateSettings(c.ex?c.ex.settings:{});return {ok:sv.ok,capital:sv.ok?sv.capital:null,riskPct:sv.ok?sv.riskPct:X.DEFAULTS.riskPct,costBps:sv.ok?sv.costBps:X.DEFAULTS.costBps};};
+  /* R38: panel memakai posisi NYATA (sinyal yang ditandai "Saya ambil" + posisi manual). Baris pembanding = semua sinyal
+     Malomo dengan anggapan semuanya diambil (R37). */
   function riskPanel(c){
-    const sv=X.validateSettings(c.ex?c.ex.settings:{}),rp=sv.ok?sv.riskPct:X.DEFAULTS.riskPct,k=riskNumbers(c.ledger,c.now,rp);
-    const ddTone=k.ddPct>=LIMIT.ddMaxPct?'reject':k.ddPct>=LIMIT.ddEvalPct?'warn':'primary';
-    const orTone=k.openRiskPct>LIMIT.openRiskPct+1e-9?'reject':k.openRiskPct>=0.7*LIMIT.openRiskPct?'warn':'primary';
-    const ddMsg=k.ddPct>=LIMIT.ddMaxPct?'⚠ Batas rugi 50% tercapai.':k.ddPct>=LIMIT.ddEvalPct?'⚠ Titik evaluasi −20%: berhenti sejenak, cek jurnal.':'';
+    const st=savedSettings(c),k=PF.real(c.ledger,c.manual,{now:c.now,capital:st.capital,costBps:st.costBps}),all=riskNumbers(c.ledger,c.now,st.riskPct);
+    const pc=v=>fin(v)?v.toFixed(1)+'%':'—';
+    const ddTone=!fin(k.ddPct)?'':k.ddPct>=LIMIT.ddMaxPct?'reject':k.ddPct>=LIMIT.ddEvalPct?'warn':'primary';
+    const orTone=!fin(k.openRiskPct)?'':k.openRiskPct>LIMIT.openRiskPct+1e-9?'reject':k.openRiskPct>=0.7*LIMIT.openRiskPct?'warn':'primary';
+    const posTone=k.positions>LIMIT.maxPositions?'reject':k.positions===LIMIT.maxPositions?'warn':'';
+    const ddMsg=fin(k.ddPct)&&k.ddPct>=LIMIT.ddMaxPct?'⚠ Batas rugi 50% tercapai.':fin(k.ddPct)&&k.ddPct>=LIMIT.ddEvalPct?'⚠ Titik evaluasi −20%: berhenti sejenak, cek jurnal.':'';
     const box=(key,label,val,sub,tone)=>`<div class="stat rk ${tone||''}" data-risk="${key}"><div class="k">${e(label)}</div><div class="v">${val}</div><div class="muted small">${sub}</div></div>`;
-    return `<div class="risk-panel" data-risk-panel><div class="cards">
-      ${box('positions','Posisi aktif',`${k.positions} / ${LIMIT.maxPositions}`,`${k.open} masih berjalan · ${k.longs} LONG · ${k.shorts} SHORT`)}
-      ${box('open','Risiko terbuka',`${k.openRiskPct.toFixed(1)}%`,`batas ${LIMIT.openRiskPct}% modal · ${rp}% per trade`,orTone)}
-      ${box('dd','Drawdown dari puncak',`${k.ddPct.toFixed(1)}%`,`evaluasi ${LIMIT.ddEvalPct}% · batas ${LIMIT.ddMaxPct}% · ${k.trades} sinyal selesai`,ddTone)}
-      ${box('cum','Hasil kumulatif jurnal',`${k.cumPct>=0?'+':''}${k.cumPct.toFixed(1)}%`,'modal, tanpa kompaun',k.cumPct>=0?'primary':'warn')}</div>
-      ${ddMsg?`<div class="warnbox" style="margin-top:8px" data-risk-warn>${e(ddMsg)}</div>`:''}
-      <div class="muted small" style="margin-top:6px">Peringatan saja — tidak memblokir sinyal dan tidak mengubah skor. Dihitung dari jurnal Decision dengan anggapan setiap sinyal diambil dengan risiko ${rp}%; bukan saldo akun Binance-mu.</div></div>`;
+    return `<div class="risk-panel" data-risk-panel><div class="muted small" style="margin-bottom:6px"><b>Posisi saya</b> — sinyal yang ditandai <b>Saya ambil</b> + posisi manual</div><div class="cards">
+      ${box('positions','Posisi terbuka',`${k.positions} / ${LIMIT.maxPositions}`,`${k.taken} dari Decision · ${k.manual} manual · ${k.longs} LONG · ${k.shorts} SHORT`,posTone)}
+      ${box('open','Risiko terbuka',pc(k.openRiskPct),`${e(usdt(k.riskUsdt))} bila semua SL kena · batas ${LIMIT.openRiskPct}%`,orTone)}
+      ${box('dd','Drawdown dari puncak',pc(k.ddPct),`evaluasi ${LIMIT.ddEvalPct}% · batas ${LIMIT.ddMaxPct}% · ${k.closed} posisi selesai`,ddTone)}
+      ${box('cum','Hasil kumulatif',fin(k.cumPct)?(k.cumPct>=0?'+':'')+k.cumPct.toFixed(1)+'%':'—',`${e((k.cumUsdt>=0?'+':'')+usdt(k.cumUsdt))} · perkiraan setelah biaya`,fin(k.cumPct)?(k.cumPct>=0?'primary':'warn'):'')}</div>
+      ${k.positions>LIMIT.maxPositions?'<div class="warnbox" style="margin-top:8px" data-risk-warn>⚠ Posisi terbuka melebihi 10.</div>':''}${ddMsg?`<div class="warnbox" style="margin-top:8px" data-risk-warn>${e(ddMsg)}</div>`:''}
+      ${k.hasCapital?'':'<div class="warnbox" style="margin-top:8px" data-risk-nocap>Isi & simpan modal di pengaturan supaya persen risiko bisa dihitung.</div>'}
+      <div class="muted small" style="margin-top:6px" data-risk-all>Pembanding — semua sinyal Malomo (anggap semua diambil @${e(st.riskPct)}%): ${all.positions} posisi · risiko terbuka ${all.openRiskPct.toFixed(1)}% · drawdown ${all.ddPct.toFixed(1)}% · kumulatif ${(all.cumPct>=0?'+':'')}${all.cumPct.toFixed(1)}%.</div>
+      <div class="muted small" style="margin-top:4px">Peringatan saja — tidak memblokir sinyal dan tidak mengubah skor. Catatan dari isianmu, bukan saldo akun Binance.</div></div>`;
+  }
+
+  // ---------- R38 posisi manual ----------
+  function manualCard(p,c){
+    const tk=c.live.prices[p.symbol],px=tk?tk.price:NaN,s=p.side==='LONG'?1:-1,risk=Math.abs(p.entry-p.stop);
+    const R=px>0&&risk>0?s*(px-p.entry)/risk:null,upnl=px>0?p.qty*s*(px-p.entry):null;
+    return `<div class="dec-card man ${e(p.side)}" data-man="${e(p.id)}">
+      <div class="dec-head"><span class="chip warn">MANUAL</span><a class="dec-sym pair-link" href="#" data-action="pair" data-sym="${e(p.symbol)}">${e(p.symbol.replace(/USDT$/,''))}</a>${side(p.side)}
+        <div class="dec-meta">dibuka ${e(L.time(p.openedMs))} · ${e(L.date(p.openedMs))}${p.tp1AtMs?' · TP1 kena '+e(L.time(p.tp1AtMs)):''}</div></div>
+      <div class="dec-price"><span class="px">${px>0?e(L.price(px)):'—'}</span><span class="rr ${fin(R)&&R>=0?'pos':'neg'}">${fin(R)?(R>=0?'+':'')+R.toFixed(2)+'R':'—'}${fin(upnl)?' · '+(upnl>=0?'+':'')+e(usdt(upnl)):''}</span></div>
+      <div class="dec-lv"><div><span>SL</span>${e(L.price(p.stop))}</div><div><span>ENTRY</span>${e(L.price(p.entry))}</div><div><span>TP1</span>${fin(p.target)?e(L.price(p.target)):'—'}</div><div><span>TP2</span>${fin(p.target2)?e(L.price(p.target2)):'—'}</div></div>
+      <div class="muted small">Qty ${e(String(+p.qty.toPrecision(8)))} · risiko ${e(usdt(PF.openRisk(PF.fromManual(p))))} · tanpa skor Malomo · ditutup otomatis bila SL/TP kena (candle 4H close)</div>
+      <div class="exf-actions"><button class="btn" data-action="man-close-open" data-id="${e(p.id)}">Tutup</button><button class="btn" data-action="man-delete" data-id="${e(p.id)}">Hapus (salah input)</button></div></div>`;
+  }
+  function manualList(c){
+    const open=PF.openManual(c.manual);
+    if(!open.length)return '<div class="muted small" data-empty="manual">Belum ada posisi manual terbuka.</div>';
+    return open.map(p=>manualCard(p,c)).join('');
+  }
+
+  // ---------- R38 lembar isian (Saya ambil / posisi manual / tutup manual) ----------
+  const ERRS={INVALID:'tidak valid',BEYOND_STOP:'entry sudah melewati SL',WRONG_SIDE:'di sisi yang salah',NEED_TP1:'isi TP1 dulu',NEED_CAPITAL:'isi qty, atau simpan modal dulu',NOT_FOUND:'tidak ditemukan',NOT_OPEN:'posisi sudah tertutup'};
+  function sheet(c,sh){
+    if(!sh)return '';
+    const err=k=>sh.errors&&sh.errors[k]?`<small class="bad">${e(ERRS[sh.errors[k]]||sh.errors[k])}</small>`:'';
+    const inp=(k,label,val,extra='')=>`<label class="exf${sh.errors&&sh.errors[k]?' bad':''}"><span>${e(label)}</span><input data-sh="${k}" inputmode="decimal" autocomplete="off" value="${e(val??'')}" ${extra}>${err(k)}</label>`;
+    let title='',body='',save='';
+    if(sh.type==='take'){const en=c.ledger.entries[sh.key];if(!en)return '';
+      title=`Saya ambil — ${e(en.symbol)} ${e(en.side)}`;
+      body=`<div class="muted small">Isi harga entry dan qty yang <b>benar-benar terisi</b> di Binance. SL/TP mengikuti sinyal: SL ${e(L.price(en.stop))} · TP1 ${e(L.price(en.target))}${fin(en.target2)?' · TP2 '+e(L.price(en.target2)):''}.</div>
+        <div class="exf-grid">${inp('entry','Harga entry',sh.prefill.entry)}${inp('qty','Qty',sh.prefill.qty)}</div>`;
+      save='take-save';}
+    else if(sh.type==='manual'){const v=sh.prefill||{};
+      title='Posisi manual baru';
+      const opts=(c.app.eligible||[]).slice().sort();
+      body=`<div class="muted small">Posisi di luar sinyal Malomo. Tidak punya skor; hanya dicatat untuk panel risiko & jurnal.</div>
+        <div class="exf-grid"><label class="exf${sh.errors&&sh.errors.symbol?' bad':''}"><span>Pair</span><input data-sh="symbol" list="sym-list" autocomplete="off" value="${e(v.symbol||'')}" placeholder="mis. SOLUSDT"><datalist id="sym-list">${opts.map(x=>`<option value="${e(x)}">`).join('')}</datalist>${err('symbol')}</label>
+        <label class="exf"><span>Arah</span><select data-sh="side"><option value="LONG"${v.side!=='SHORT'?' selected':''}>LONG</option><option value="SHORT"${v.side==='SHORT'?' selected':''}>SHORT</option></select>${err('side')}</label>
+        ${inp('entry','Entry',v.entry)}${inp('stop','SL',v.stop)}${inp('target','TP1 (opsional)',v.target)}${inp('target2','TP2 (opsional, 50/50)',v.target2)}
+        ${inp('qty','Qty (kosong = dari risiko %)',v.qty)}${inp('riskPct','Risiko % (bila qty kosong)',v.riskPct??String(savedSettings(c).riskPct))}</div>`;
+      save='man-save';}
+    else if(sh.type==='close'){const p=c.manual.positions[sh.id];if(!p)return '';
+      title=`Tutup posisi manual — ${e(p.symbol)} ${e(p.side)}`;
+      body=`<div class="muted small">Sisa qty ditutup pada harga yang diisi (default = harga terakhir).</div><div class="exf-grid">${inp('exit','Harga keluar',sh.prefill.exit)}</div>`;
+      save='man-close-save';}
+    return `<div class="sheet-back" data-action="sheet-cancel"></div><div class="sheet" role="dialog" aria-modal="true" aria-label="${title}" data-sheet="${e(sh.type)}"><h3>${title}</h3>${body}
+      ${sh.errors&&sh.errors.key?`<div class="warnbox">${e(ERRS[sh.errors.key]||sh.errors.key)}</div>`:''}
+      <div class="exf-actions"><button class="btn primary" data-action="${save}">Simpan</button><button class="btn" data-action="sheet-cancel">Batal</button></div></div>`;
   }
 
   // ---------- Layar 1: Decision ----------
@@ -120,17 +175,24 @@
     const o=en.outcome||{code:'OPEN'},release=en.entryMs+LG.HOLD,s=en.scores;
     const oTxt=o.code==='OPEN'?`${o.tp1AtMs?'TP1 kena '+L.time(o.tp1AtMs)+' · sisa berjalan · ':'Berjalan · '}slot 24 jam lepas dalam ${L.durationShort(release-now)}`:`${LG.outcomeText(en)} ${L.time(o.atMs)}${fin(o.r)?' ('+(o.r>=0?'+':'')+o.r.toFixed(2)+'R)':''}`;
     return `<div class="dec-card ${e(en.side)}" data-dec="${e(en.key)}">
-      <div class="dec-head"><span class="run-tag"><span class="run-dot"></span>${o.code==='OPEN'?'RUNNING':'SELESAI'}</span><span class="dec-sym">${e(en.symbol.replace(/USDT$/,''))}</span>${en.rank?`<span class="muted small">#${en.rank}</span>`:''}${side(en.side)}<span class="chip neutral">${e(L.FAMILY[en.family]||en.family)}</span>${regimeChip(en.regime)}
+      <div class="dec-head"><span class="run-tag"><span class="run-dot"></span>${o.code==='OPEN'?'RUNNING':'SELESAI'}</span><a class="dec-sym pair-link" href="#" data-action="pair" data-sym="${e(en.symbol)}">${e(en.symbol.replace(/USDT$/,''))}</a>${en.rank?`<span class="muted small">#${en.rank}</span>`:''}${side(en.side)}<span class="chip neutral">${e(L.FAMILY[en.family]||en.family)}</span>${regimeChip(en.regime)}
         <div class="dec-meta">keputusan ${e(L.time(en.decisionMs))} · ${e(L.date(en.decisionMs))}</div></div>
       <div class="dec-scores" data-locked="1"><div><span>M1 + M2q</span><b data-score="m1m2q">${sc(s.m1m2q,180)}</b></div><div><span>M6 (indeks)</span><b data-score="m6">${sc(s.m6,500)}</b></div><div><span>M1 Struktur</span><b>${sc(s.m1)}</b></div><div><span>M2 Kualitas</span><b>${sc(s.m2q)}</b></div><div class="lock" title="Skor dibekukan saat masuk Decision; refresh data tidak mengubahnya">🔒 skor dikunci</div></div>
       <div class="dec-price"><span class="px">${px>0?e(L.price(px)):'—'}</span><span class="rr ${fin(R)&&R>=0?'pos':'neg'}">${fin(R)?(R>=0?'+':'')+R.toFixed(2)+'R':'—'}</span></div>
       <div class="dec-prog" title="Stop → Entry → ${fin(en.target2)?'TP1 → TP2':'Target'}"><div class="fill" style="width:${px>0?fromStop(px):0}%"></div><div class="mark" style="left:${fromStop(en.entry)}%"></div>${fin(en.target2)?`<div class="mark tp1" style="left:${fromStop(en.target)}%"></div>`:''}${px>0?`<div class="now" style="left:${fromStop(px)}%"></div>`:''}</div>
       <div class="dec-lv"><div><span>SL</span>${e(L.price(en.stop))}</div><div><span>ENTRY</span>${e(L.price(en.entry))}</div>${fin(en.target2)?`<div><span>TP1 (2R)</span>${e(L.price(en.target))}</div><div><span>TP2 (3R)</span>${e(L.price(en.target2))}</div>`:`<div><span>TP (2R)</span>${e(L.price(en.target))}</div><div><span>RR</span>1:${(Math.abs(en.target-en.entry)/risk).toFixed(2)}</div>`}</div>
       <div class="dec-outcome ${o.code==='STOP_HIT'?'neg':o.code==='TARGET_HIT'||o.code==='TP1_STOP'||o.code==='TP1_HORIZON'||o.tp1AtMs?'pos':'muted'}">${e(oTxt)}</div>
+      ${takeBar(en,c)}
       ${execPanel({symbol:en.symbol,side:en.side,entry:en.entry,stop:en.stop,target:en.target,target2:en.target2,tp1Frac:en.tp1Frac},ex)}
       <div class="dec-data"><div class="dec-cell"><div class="lbl">OPEN INTEREST</div>${oi}</div><div class="dec-cell"><div class="lbl">CVD (TAKER)</div>${cvd}</div><div class="dec-cell"><div class="lbl">ORDERBOOK</div>${ob}</div>
         <div class="dec-cell"><div class="lbl">INVALIDASI</div><div class="sub ${invWarn?'dec-warn':''}">${e(invShort(inv))}${invWarn?'<br>⚠ harga sudah melewati level invalidasi':''}</div></div></div>
       <div class="muted small" style="margin-top:8px">OI · CVD · orderbook hanya tampilan, tidak masuk skor (PRD §4.5).</div></div>`;
+  }
+  // R38: tombol "Saya ambil" / status diambil (catatan pengguna; skor & sinyal tidak berubah).
+  function takeBar(en,c){
+    if(en.taken){const st=savedSettings(c),pos=PF.fromTaken(en),v=pos.done?PF.pnl(pos,st.costBps):null;
+      return `<div class="taken-bar" data-taken="${e(en.key)}"><span class="chip primary">✓ Diambil</span><span class="mono small">entry ${e(L.price(en.taken.entry))} · qty ${e(String(+en.taken.qty.toPrecision(8)))}${fin(v)?' · hasil '+(v>=0?'+':'')+e(usdt(v)):''}</span><button class="btn" data-action="untake" data-key="${e(en.key)}">Batal ambil</button></div>`;}
+    return `<div class="taken-bar"><button class="btn primary" data-action="take-open" data-key="${e(en.key)}">Saya ambil</button><span class="muted small">tandai bila kamu benar-benar masuk posisi ini</span></div>`;
   }
   function decisionList(c){
     const act=LG.active(c.ledger,c.now);
@@ -142,6 +204,7 @@
     const n=LG.active(c.ledger,c.now).length;
     return `<div class="section-head"><h2>Decision</h2><span class="muted small">${n} pair lolos hard gate engine · urut close terbaru lalu M6 · skor dikunci saat masuk</span></div>
       ${riskPanel(c)}${execForm(c.ex)}<div id="dec-list" class="dec-list">${decisionList(c)}</div>
+      <div class="section-head" style="margin-top:16px"><h3>Posisi manual</h3><button class="btn" data-action="man-open">+ Posisi manual</button></div><div id="man-list" class="dec-list">${manualList(c)}</div>
       <div class="note" style="margin-top:12px">Decision = status <b>Layak dipertimbangkan</b> PRD (semua gate lolos, termasuk slot &amp; risiko portofolio: maks 10 posisi, risiko 1%/trade, risiko terbuka ≤10%; bila lebih dari 10 sinyal lolos bersamaan, urutan menurut M6). M6 adalah indeks 0–500, bukan peluang menang. Batas skor "layak" belum ditetapkan — menunggu riset Tahap 2.</div>`;
   }
 
@@ -160,7 +223,7 @@
     if(f.q){const q=f.q.trim().toUpperCase();rows=rows.filter(r=>r.symbol.includes(q));}
     if(f.sort==='m1')rows.sort((a,b)=>(fin(b.m1)?b.m1:-1)-(fin(a.m1)?a.m1:-1)||a.rank-b.rank);
     if(!rows.length)return '<tr><td colspan="8" class="muted small">Tidak ada pair untuk filter ini.</td></tr>';
-    return rows.map(r=>`<tr data-pair="${e(r.symbol)}"><td class="num">${r.rank??'—'}</td><td><b>${e(r.symbol)}</b></td><td class="num mono">${e(L.price(r.price))}</td>
+    return rows.map(r=>`<tr data-pair="${e(r.symbol)}"><td class="num">${r.rank??'—'}</td><td><a class="pair-link" href="#" data-action="pair" data-sym="${e(r.symbol)}"><b>${e(r.symbol)}</b></a></td><td class="num mono">${e(L.price(r.price))}</td>
       <td class="num ${fin(r.chg)?(r.chg>=0?'pos':'neg'):''}">${fin(r.chg)?(r.chg>=0?'+':'')+r.chg.toFixed(2)+'%':'—'}</td><td class="num">${e(L.compactUsd(r.vol))}</td>
       <td>${r.loaded?e(L.STRUCT[r.structure]||'—'):'<span class="muted small">memuat…</span>'}</td><td class="num" data-m1>${r.loaded?sc(r.m1,100):'—'}</td>
       <td><span class="chip ${ST_TXT[r.status][1]}">${e(ST_TXT[r.status][0])}</span>${fin(r.m6)?` <span class="mono small">M6 ${e(L.score(r.m6))}</span>`:''}</td></tr>`).join('');
@@ -179,27 +242,45 @@
   function journalScreen(c,f){
     const all=LG.finished(c.ledger),num=v=>{const n=Number(String(v).replace(',','.'));return String(v).trim()!==''&&Number.isFinite(n)?n:null;};
     const rows=LG.filter(all,Object.assign({},f,{m6min:num(f.m6min),m6max:num(f.m6max)})),sm=LG.summary(rows);
+    const cost=savedSettings(c).costBps,tk=rows.filter(r=>r.taken),tkP=tk.map(r=>PF.pnl(PF.fromTaken(r),cost)).filter(fin),tkSum=tkP.reduce((a,b)=>a+b,0);
     const uniq=k=>[...new Set(all.map(r=>r[k]))].sort();
     const sel=(k,label,opts)=>`<label>${e(label)}<select data-jf="${k}"><option value="">Semua</option>${opts.map(([v,t])=>`<option value="${e(v)}"${f[k]===v?' selected':''}>${e(t)}</option>`).join('')}</select></label>`;
     const stat=(k,label,v)=>`<div class="stat" data-jstat="${k}"><div class="k">${e(label)}</div><div class="v">${v}</div></div>`;
     let h=`<div class="section-head"><h2>Jurnal Sinyal</h2><button class="btn" data-action="download-journal">Unduh CSV (${rows.length})</button></div>
       <div class="filters">${sel('pair','Pair',uniq('symbol').map(s=>[s,s]))}${sel('side','Arah',[['LONG','LONG'],['SHORT','SHORT']])}${sel('family','Keluarga',uniq('family').map(s=>[s,L.FAMILY[s]||s]))}
+        ${sel('taken','Diambil',[['yes','Ya'],['no','Tidak']])}
         ${sel('outcome','Hasil',[['TARGET_HIT','Kena TP / TP2'],['TP1_STOP','TP1 lalu SL'],['TP1_HORIZON','TP1 lalu keluar 24 jam'],['STOP_HIT','Kena SL'],['HORIZON_EXIT','Keluar 24 jam'],['NO_DATA','Data tidak ada']])}
         <label>M6 min<input data-jf="m6min" inputmode="decimal" value="${e(f.m6min||'')}" placeholder="mis. 320"></label><label>M6 maks<input data-jf="m6max" inputmode="decimal" value="${e(f.m6max||'')}"></label></div>
-      <div class="cards">${stat('n','Sinyal selesai',sm.n)}${stat('tp','Kena TP / TP2',sm.TARGET_HIT)}${stat('tp1','TP1 lalu SL / 24 jam',sm.TP1_STOP+sm.TP1_HORIZON)}${stat('sl','Kena SL',sm.STOP_HIT)}${stat('hz','Keluar 24 jam',sm.HORIZON_EXIT)}${stat('avg','Rata-rata R',fin(sm.avgR)?(sm.avgR>=0?'+':'')+sm.avgR.toFixed(3):'—')}</div>`;
-    if(!rows.length)return h+`<div class="empty" data-empty="jurnal">${all.length?'Belum ada sinyal selesai untuk filter ini.':'Belum ada sinyal Decision yang selesai. Setiap pair yang masuk Decision dicatat otomatis di sini setelah hasilnya (TP / SL / 24 jam) diketahui.'}</div>`;
+      <div class="cards">${stat('n','Sinyal selesai',sm.n)}${stat('tp','Kena TP / TP2',sm.TARGET_HIT)}${stat('tp1','TP1 lalu SL / 24 jam',sm.TP1_STOP+sm.TP1_HORIZON)}${stat('sl','Kena SL',sm.STOP_HIT)}${stat('hz','Keluar 24 jam',sm.HORIZON_EXIT)}${stat('avg','Rata-rata R',fin(sm.avgR)?(sm.avgR>=0?'+':'')+sm.avgR.toFixed(3):'—')}${stat('taken','Diambil · hasil',`${tk.length} · ${tkP.length?(tkSum>=0?'+':'')+e(usdt(tkSum)):'—'}`)}</div>`;
+    const man=manualJournal(c);
+    if(!rows.length)return h+man+`<div class="empty" data-empty="jurnal">${all.length?'Belum ada sinyal selesai untuk filter ini.':'Belum ada sinyal Decision yang selesai. Setiap pair yang masuk Decision dicatat otomatis di sini setelah hasilnya (TP / SL / 24 jam) diketahui.'}</div>`;
     h+=`<div class="table-wrap"><table class="journal"><thead><tr><th>Keputusan</th><th>Pair</th><th>Arah</th><th>Keluarga</th><th class="num">M1+M2q</th><th class="num">M6</th><th>Rezim BTC</th>
-      <th class="num">Entry</th><th class="num">SL</th><th class="num">TP1</th><th class="num">TP2</th><th>Hasil</th><th class="num">Keluar</th><th class="num">R</th></tr></thead><tbody>`;
+      <th class="num">Entry</th><th class="num">SL</th><th class="num">TP1</th><th class="num">TP2</th><th>Hasil</th><th class="num">Keluar</th><th class="num">R</th><th>Diambil</th></tr></thead><tbody>`;
     for(const r of rows.slice(0,300)){const o=r.outcome;
       h+=`<tr data-jrow="${e(r.key)}"><td class="small">${e(L.dateTime(r.decisionMs))}</td><td><b>${e(r.symbol)}</b>${r.rank?` <span class="muted small">#${r.rank}</span>`:''}</td><td>${side(r.side)}</td><td>${e(L.FAMILY[r.family]||r.family)}</td>
         <td class="num">${sc(r.scores.m1m2q)}</td><td class="num">${sc(r.scores.m6)}</td><td>${regimeChip(r.regime)||'—'}</td>
         <td class="num mono">${e(L.price(r.entry))}</td><td class="num mono">${e(L.price(r.stop))}</td><td class="num mono">${e(L.price(r.target))}</td><td class="num mono">${fin(r.target2)?e(L.price(r.target2)):'—'}</td>
         <td><span class="chip ${o.code==='TARGET_HIT'?'primary':o.code==='STOP_HIT'?'reject':'neutral'}">${e(LG.outcomeText(r))}</span><div class="muted small">${o.tp1AtMs?'TP1 '+e(L.time(o.tp1AtMs))+' · ':''}${e(L.time(o.atMs))}</div></td>
-        <td class="num mono">${e(L.price(o.exit))}</td><td class="num ${fin(o.r)?(o.r>=0?'pos':'neg'):''}">${fin(o.r)?(o.r>=0?'+':'')+o.r.toFixed(2):'—'}</td></tr>`;}
+        <td class="num mono">${e(L.price(o.exit))}</td><td class="num ${fin(o.r)?(o.r>=0?'pos':'neg'):''}">${fin(o.r)?(o.r>=0?'+':'')+o.r.toFixed(2):'—'}</td>
+        <td class="small" data-jtaken="${r.taken?'yes':'no'}">${r.taken?(()=>{const v=PF.pnl(PF.fromTaken(r),cost);return '✓ '+(fin(v)?(v>=0?'+':'')+e(usdt(v)):'');})():'—'}</td></tr>`;}
     h+='</tbody></table></div>';
     if(rows.length>300)h+=`<div class="muted small">300 terbaru ditampilkan; seluruh ${rows.length} baris ada di unduhan CSV.</div>`;
+    h+=man;
     return h+'<div class="note" style="margin-top:10px">Hasil menurut candle 4H Binance dengan harga yang dibekukan saat Decision (stop dievaluasi lebih dahulu, TP1 2R tutup 50% lalu TP2 3R, SL tetap, horizon 24 jam; R = gabungan kedua bagian) — bukan fill order akunmu. Hanya sinyal yang benar-benar masuk Decision saat aplikasi berjalan yang dicatat.</div>';
   }
 
-  root.Malomo.ui={health,universeLine,regimeChip,riskPanel,riskNumbers,execForm,execSaveStatus,execPanel,decisionCard,decisionList,decisionScreen,pairsRows,pairsScreen,journalScreen};
+  // R38: posisi manual yang sudah selesai — terpisah dari statistik sinyal Malomo.
+  function manualJournal(c){
+    const done=PF.closedManual(c.manual);if(!done.length)return '';
+    const cost=savedSettings(c).costBps,TXT={STOP_HIT:'kena SL',TARGET_HIT:'kena TP',TP1_STOP:'TP1 lalu SL',USER_CLOSE:'ditutup sendiri'};
+    let sum=0;const rows=done.slice(0,300).map(p=>{const v=PF.pnl(PF.fromManual(p),cost);if(fin(v))sum+=v;
+      return `<tr data-mrow="${e(p.id)}"><td class="small">${e(L.dateTime(p.openedMs))}</td><td><a class="pair-link" href="#" data-action="pair" data-sym="${e(p.symbol)}"><b>${e(p.symbol)}</b></a></td><td>${side(p.side)}</td>
+        <td class="num mono">${e(L.price(p.entry))}</td><td class="num mono">${e(L.price(p.stop))}</td><td class="num mono">${fin(p.target)?e(L.price(p.target)):'—'}</td><td class="num mono">${fin(p.target2)?e(L.price(p.target2)):'—'}</td>
+        <td>${e(TXT[p.closed.code]||p.closed.code)}<div class="muted small">${e(L.time(p.closed.atMs))}</div></td><td class="num mono">${e(L.price(p.closed.exit))}</td><td class="num ${fin(v)?(v>=0?'pos':'neg'):''}">${fin(v)?(v>=0?'+':'')+e(usdt(v)):'—'}</td></tr>`;}).join('');
+    return `<div class="section-head" style="margin-top:16px"><h3>Posisi manual selesai</h3><button class="btn" data-action="download-manual">Unduh CSV manual (${done.length})</button></div>
+      <div class="muted small" data-man-sum>Total ${done.length} posisi · hasil ${(sum>=0?'+':'')+e(usdt(sum))} (perkiraan setelah biaya). Tidak dicampur ke statistik sinyal Malomo.</div>
+      <div class="table-wrap"><table class="journal"><thead><tr><th>Dibuka</th><th>Pair</th><th>Arah</th><th class="num">Entry</th><th class="num">SL</th><th class="num">TP1</th><th class="num">TP2</th><th>Hasil</th><th class="num">Keluar</th><th class="num">USDT</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+
+  root.Malomo.ui={health,universeLine,regimeChip,riskPanel,riskNumbers,manualList,sheet,execForm,execSaveStatus,execPanel,decisionCard,decisionList,decisionScreen,pairsRows,pairsScreen,journalScreen};
 })(globalThis);

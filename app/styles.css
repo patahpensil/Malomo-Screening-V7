@@ -257,3 +257,17 @@ td.pos{color:var(--long);} td.neg{color:var(--short);}
 .stat.rk.warn{border-color:var(--warn);} .stat.rk.warn .v{color:var(--warn);}
 .stat.rk.reject{border-color:var(--reject);} .stat.rk.reject .v{color:var(--reject);}
 .dec-prog .mark.tp1{background:var(--long);opacity:.8;}
+/* R38 Saya ambil, posisi manual, lembar isian */
+.taken-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0;}
+.pair-link{color:inherit;text-decoration:none;}
+.dec-card.man{border-style:dashed;}
+.sheet-wrap[hidden]{display:none;}
+.sheet-back{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:50;}
+.sheet{position:fixed;z-index:51;left:50%;top:50%;transform:translate(-50%,-50%);width:min(520px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:16px;box-shadow:0 10px 40px rgba(0,0,0,.5);}
+.sheet h3{margin:0 0 8px;font-size:16px;}
+.sheet .exf-grid{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:10px;}
+.sheet select{width:100%;}
+.exf small.bad{color:var(--reject);}
+@media (max-width:767px){.sheet{top:auto;bottom:0;transform:translateX(-50%);border-radius:var(--r-lg) var(--r-lg) 0 0;width:100vw;max-height:85vh;}}
+.exf select{font:inherit;color:var(--text);background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);padding:7px 9px;}

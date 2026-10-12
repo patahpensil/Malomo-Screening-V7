@@ -106,7 +106,8 @@
     s.avgR=s.nR?s.sumR/s.nR:null;return s;
   }
   function filter(rows,f={}){
-    return rows.filter(e=>(!f.pair||e.symbol===f.pair)&&(!f.side||e.side===f.side)&&(!f.family||e.family===f.family)
+    const tk=e=>!!(e.taken&&fin(e.taken.qty)&&e.taken.qty>0);
+    return rows.filter(e=>(!f.pair||e.symbol===f.pair)&&(!f.side||e.side===f.side)&&(!f.family||e.family===f.family)&&(!f.taken||(f.taken==='yes'?tk(e):!tk(e)))
       &&(!f.outcome||e.outcome.code===f.outcome)&&(!fin(f.m6min)||(fin(e.scores.m6)&&e.scores.m6>=f.m6min))&&(!fin(f.m6max)||(fin(e.scores.m6)&&e.scores.m6<=f.m6max)));
   }
   function prune(L){
@@ -139,8 +140,10 @@
     ['entry',e=>num(e.entry)],['sl',e=>num(e.stop)],['tp1',e=>num(e.target)],['tp2',e=>num(e.target2)],['bagian_tp1',e=>num(e.tp1Frac)],['rr_tp1',e=>num(e.rr)],['rr_tp2',e=>num(e.rr2)],
     ['waktu_tp1_utc',e=>isoUtc(e.outcome.tp1AtMs)],
     ['hasil',e=>outcomeText(e)],['waktu_keluar_utc',e=>isoUtc(e.outcome.atMs)],['harga_keluar',e=>num(e.outcome.exit)],['r',e=>num(e.outcome.r,4)],
-    ['durasi_jam',e=>fin(e.outcome.atMs)?((e.outcome.atMs-e.entryMs)/3600000).toFixed(0):''],['invalidasi',e=>e.invalidation?e.invalidation.rule+' '+num(e.invalidation.price):''],['mandat_risiko',e=>e.mandate||'']];
-  function csv(rows){return '﻿'+[COLS.map(c=>c[0]).join(','),...rows.map(e=>COLS.map(c=>cell(c[1](e))).join(','))].join('\r\n')+'\r\n';}
+    ['durasi_jam',e=>fin(e.outcome.atMs)?((e.outcome.atMs-e.entryMs)/3600000).toFixed(0):''],['invalidasi',e=>e.invalidation?e.invalidation.rule+' '+num(e.invalidation.price):''],['mandat_risiko',e=>e.mandate||''],
+    // R38: catatan pengguna "Saya ambil" (bukan fill dari akun Binance).
+    ['diambil',e=>e.taken?'ya':'tidak'],['entry_aktual',e=>e.taken?num(e.taken.entry):''],['qty_aktual',e=>e.taken?num(e.taken.qty):''],['pnl_usdt_perkiraan',(e,o)=>o&&o.pnl&&e.taken?num(o.pnl(e),4):'']];
+  function csv(rows,opts={}){return '﻿'+[COLS.map(c=>c[0]).join(','),...rows.map(e=>COLS.map(c=>cell(c[1](e,opts))).join(','))].join('\r\n')+'\r\n';}
 
   return {VERSION,MAX_ENTRIES,HOLD,keyOf,empty,freeze,outcomeOf,resolve,active,unresolved,outcomeText,finished,summary,filter,load,csv,COLS:COLS.map(c=>c[0]),OUTCOME_TEXT:OUT};
 });

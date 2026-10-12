@@ -10,7 +10,7 @@ Spesifikasi riset **enam metodologi trading berbobot (M1–M5) dan M6 CONFLUENSE
 
 | Berkas | Fungsi |
 |---|---|
-| `PRD_FINAL_ENAM_METODOLOGI_M1_M6_CONFLUENSE_2026-10-10.md` | **Spesifikasi normatif tunggal** (v1.0.15-FINAL-DESIGN): rumus M1–M6, status tiga lapis, kontrak JSON, acceptance test, riwayat revisi |
+| `PRD_FINAL_ENAM_METODOLOGI_M1_M6_CONFLUENSE_2026-10-10.md` | **Spesifikasi normatif tunggal** (v1.0.16-FINAL-DESIGN): rumus M1–M6, status tiga lapis, kontrak JSON, acceptance test, riwayat revisi |
 | `LAPORAN_VALIDASI_PRD_FINAL_M1_M6_2026-10-10.md` | Batas bukti dan ringkasan verifikasi tiap revisi |
 | `verify_final_prd.py` | Verifier offline (Python 3 standar, tanpa dependensi) |
 | `VALIDASI_PRD_FINAL_M1_M6.json` | Hasil verifier terakhir |
@@ -176,6 +176,7 @@ Isi kartu berasal dari posisi simulasi `ENTRY_CONSIDER` (PRD §6), bukan dari tr
 | v1.0.13 | Tiga layar Decision / Semua Pair / Jurnal, skor dikunci, universe realtime (R35), PRD §18 | Selesai (uji browser 17/17; ledger data asli identik) |
 | v1.0.14 | Jurnal hanya sinyal Decision; tombol Simpan pengaturan (R36), PRD §18.7 | Selesai (uji browser 19/19) |
 | v1.0.15 | Mandat risiko LIVE: 10 posisi, 1%/trade, risiko terbuka ≤10%, tanpa batas notional, TP1 2R (50%) + TP2 3R; panel risiko; perbaikan hasil jurnal (R37), PRD §19 | Selesai (uji browser 19/19; data asli 2024–2026: maks 10 posisi, skor identik di kedua mandat) |
+| v1.0.16 | Posisi nyata: tombol Saya ambil, posisi manual, panel risiko dari posisi nyata, jurnal Diambil + manual (R38), PRD §20 | Selesai (uji browser 21/21, posisi nyata 7/7) |
 
 ## Catatan bukti
 

@@ -139,12 +139,13 @@ const nav=async(page,viewport,screen)=>{await page.locator((viewport.width<768?'
         assert.equal(await page.locator('#dec-list [data-exec-status="NEED_SETTINGS"]').count(),ACTIVE.length);
         // R37: setiap kartu menampilkan TP1 & TP2 (mandat LIVE) dan panel risiko = hitungan dari jurnal (risiko default 1%).
         for(let i=0;i<ACTIVE.length;i++){const lv=await page.locator('#dec-list .dec-card').nth(i).locator('.dec-lv').innerText();assert(lv.includes('TP1')&&lv.includes('TP2'),'kartu tanpa TP1/TP2');assert(Number.isFinite(ACTIVE[i].target2));}
+        // R38: panel = posisi NYATA (belum ada yang diambil, modal belum disimpan); baris pembanding = semua sinyal (R37).
         const RK=riskOf(1);
-        assert.equal(await page.locator('[data-risk="positions"] .v').innerText(),`${RK.positions} / 10`);
-        assert.equal(await page.locator('[data-risk="open"] .v').innerText(),RK.openRiskPct.toFixed(1)+'%');
-        assert.equal(await page.locator('[data-risk="dd"] .v').innerText(),RK.ddPct.toFixed(1)+'%');
-        assert.equal(await page.locator('[data-risk="cum"] .v').innerText(),(RK.cumPct>=0?'+':'')+RK.cumPct.toFixed(1)+'%');
+        assert.equal(await page.locator('[data-risk="positions"] .v').innerText(),'0 / 10');assert.equal(await page.locator('[data-risk="open"] .v').innerText(),'—');
+        assert.equal(await page.locator('[data-risk-nocap]').count(),1);
+        assert.equal(await page.locator('[data-risk-all]').innerText(),`Pembanding — semua sinyal Malomo (anggap semua diambil @1%): ${RK.positions} posisi · risiko terbuka ${RK.openRiskPct.toFixed(1)}% · drawdown ${RK.ddPct.toFixed(1)}% · kumulatif ${RK.cumPct>=0?'+':''}${RK.cumPct.toFixed(1)}%.`);
         assert((await page.locator('[data-risk-panel]').innerText()).includes('tidak memblokir'));
+        assert.equal(await page.locator('#dec-list [data-action="take-open"]').count(),ACTIVE.length);assert.equal(await page.locator('[data-empty="manual"]').count(),1);
         assert((await page.locator('#health').innerText()).includes('Data lengkap'));
         assert.equal(await page.locator('[data-universe]').getAttribute('data-universe'),String(UNIVERSE.length));
         await page.waitForFunction(()=>!/menyambung|memuat/.test(document.querySelector('#dec-list .dec-card .dec-data').innerText),null,{timeout:20000});
@@ -173,11 +174,54 @@ const nav=async(page,viewport,screen)=>{await page.locator((viewport.width<768?'
           assert.equal(await card.locator('[data-exv="qty1"]').innerText(),pl.qty1Str);assert.equal(await card.locator('[data-exv="qty2"]').innerText(),pl.qty2Str);split++;
           assert.equal(await card.locator('[data-exv="qty"]').innerText(),pl.qtyStr);assert.equal(await card.locator('[data-exv="lev"]').innerText(),pl.leverage+'×');}
         assert(split>0,'tidak ada rencana TP1/TP2 READY yang diuji');
-        // Panel risiko memakai risiko tersimpan (0,75%).
-        assert.equal(await page.locator('[data-risk="open"] .v').innerText(),riskOf(Number(SET.riskPct)).openRiskPct.toFixed(1)+'%');
+        // Pembanding memakai risiko tersimpan (0,75%).
+        assert((await page.locator('[data-risk-all]').innerText()).includes('@0.75%'));assert.equal(await page.locator('[data-risk-nocap]').count(),0);
         await page.reload();await page.waitForSelector('#dec-list .dec-card');await page.waitForFunction(()=>MalomoApp.app.state,null,{timeout:30000});assert.equal(await page.locator('.exec-form [data-exec="capital"]').inputValue(),SET.capital);
         assert.equal(await page.locator('#exec-save-status').getAttribute('data-save'),'saved','setelah reload tetap tersimpan');
         assert.equal(await page.locator('[data-save-badge]').getAttribute('data-save-badge'),'saved','status simpan terlihat di judul form walau form tertutup');
+      });
+      await run(`[${viewport.width}px] R38 Saya ambil + posisi manual: isian, panel risiko posisi nyata, tutup, jurnal`,async()=>{
+        const cap=Number(SET.capital);
+        // 1) Saya ambil pada kartu pertama yang masih berjalan: isian terisi dari rencana, simpan → tanda Diambil + panel.
+        const idx=ACTIVE.findIndex(x=>x.outcome.code==='OPEN');assert(idx>=0,'tidak ada sinyal berjalan');const en=ACTIVE[idx];
+        const pl=X.plan({symbol:en.symbol,side:en.side,entry:en.entry,stop:en.stop,target:en.target,target2:en.target2,tp1Frac:en.tp1Frac},SET,RULES[en.symbol]);
+        await page.locator(`[data-action="take-open"][data-key="${en.key}"]`).click();await page.waitForSelector('[data-sheet="take"]');
+        assert.equal(await page.locator('#sheet [data-sh="entry"]').inputValue(),pl.priceStr?pl.priceStr.entry:String(en.entry));
+        if(pl.qtyStr)assert.equal(await page.locator('#sheet [data-sh="qty"]').inputValue(),pl.qtyStr);
+        await page.locator('#sheet [data-sh="qty"]').fill('0');await page.locator('[data-action="take-save"]').click();
+        assert.equal(await page.locator('#sheet .exf.bad').count(),1,'qty 0 ditolak');
+        await page.waitForTimeout(1200);assert.equal(await page.locator('#sheet [data-sh="qty"]').inputValue(),'0','isian tidak terhapus oleh pembaruan per detik');
+        await page.locator('#sheet [data-sh="qty"]').fill('2');await page.locator('#sheet [data-sh="entry"]').fill(String(en.entry));await page.locator('[data-action="take-save"]').click();
+        await page.waitForSelector(`[data-taken="${en.key}"]`);assert(await page.locator('#sheet').isHidden());
+        const r1=2*Math.abs(en.entry-en.stop)*(en.outcome.tp1AtMs?0.5:1);
+        assert.equal(await page.locator('[data-risk="positions"] .v').innerText(),'1 / 10');assert.equal(await page.locator('[data-risk="open"] .v').innerText(),(100*r1/cap).toFixed(1)+'%');
+        const stored=JSON.parse(await page.evaluate(()=>localStorage.getItem('malomo_v7_ledger'))).entries[en.key].taken;assert.equal(stored.qty,2);assert.equal(stored.entry,en.entry);
+        // 2) Posisi manual: input salah ditandai, lalu posisi sah → kartu MANUAL + panel 2 posisi.
+        const ms='CCCUSDT',mp=RAW[ms]?Number(RAW[ms].find(k=>k[0]===T)[4]):100;
+        await page.locator('[data-action="man-open"]').click();await page.waitForSelector('[data-sheet="manual"]');
+        await page.locator('#sheet [data-sh="symbol"]').fill(ms);await page.locator('#sheet [data-sh="entry"]').fill(String(mp));await page.locator('#sheet [data-sh="stop"]').fill(String(mp*1.05));
+        await page.locator('#sheet [data-sh="qty"]').fill('3');await page.locator('[data-action="man-save"]').click();
+        assert.equal(await page.locator('#sheet .exf.bad').count(),1,'SL di sisi salah ditolak');
+        await page.locator('#sheet [data-sh="stop"]').fill(String(mp*0.95));await page.locator('[data-action="man-save"]').click();
+        await page.waitForSelector('#man-list [data-man]');
+        assert.equal(await page.locator('[data-risk="positions"] .v').innerText(),'2 / 10');
+        assert.equal(await page.locator('[data-risk="open"] .v').innerText(),((100*(r1+3*mp*0.05))/cap).toFixed(1)+'%');
+        // 3) Tutup sendiri di harga +2% → masuk jurnal manual, panel kembali 1 posisi, hasil = 3·(0,02·mp) − biaya.
+        await page.locator('#man-list [data-action="man-close-open"]').click();await page.waitForSelector('[data-sheet="close"]');
+        await page.locator('#sheet [data-sh="exit"]').fill(String(mp*1.02));await page.locator('[data-action="man-close-save"]').click();
+        await page.waitForSelector('[data-empty="manual"]');assert.equal(await page.locator('[data-risk="positions"] .v').innerText(),'1 / 10');
+        const want=3*(mp*1.02-mp)-Number(SET.costBps)/1e4*3*mp;
+        assert((await page.locator('[data-risk="cum"] .sub,[data-risk="cum"] .muted').first().innerText()).includes((want>=0?'+':'')+want.toFixed(2)+' USDT'));
+        await nav(page,viewport,'jurnal');await page.waitForSelector('[data-man-sum]');assert.equal(await page.locator('tr[data-mrow]').count(),1);
+        await page.selectOption('[data-jf="taken"]','yes');
+        assert.equal(await page.locator('tr[data-jrow]').count(),FINISHED.some(x=>x.key===en.key)?1:0);await page.selectOption('[data-jf="taken"]','');
+        const [dl]=await Promise.all([page.waitForEvent('download'),page.locator('[data-action="download-manual"]').click()]);
+        assert(fs.readFileSync(await dl.path(),'utf8').includes('USER_CLOSE'));
+        await nav(page,viewport,'decision');await page.waitForSelector('#dec-list .dec-card');
+        // 4) Batal ambil → panel kosong lagi
+        page.once('dialog',d=>d.accept());await page.locator(`[data-taken="${en.key}"] [data-action="untake"]`).click();
+        await page.waitForSelector(`[data-action="take-open"][data-key="${en.key}"]`);assert.equal(await page.locator('[data-risk="positions"] .v').innerText(),'0 / 10');
+        await common(page,viewport);
       });
       await run(`[${viewport.width}px] Semua Pair: universe realtime, stablecoin/non-TRADING tersaring, M1 = engine, filter & urut`,async()=>{
         await nav(page,viewport,'pairs');await page.waitForSelector('#pairs-body tr[data-pair]');
