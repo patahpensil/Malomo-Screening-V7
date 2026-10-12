@@ -17,7 +17,7 @@
   const MAX_LEV=Object.freeze({BTCUSDT:150,ETHUSDT:125,DEFAULT:50,SMALL:20});
   const TOP_TIER=30;
   const LIMITS=Object.freeze({riskMin:0.5,riskMax:1,costMin:0,costMax:50,capitalMax:1e9});
-  const DEFAULTS=Object.freeze({capital:null,riskPct:0.5,costBps:18});
+  const DEFAULTS=Object.freeze({capital:null,riskPct:1,costBps:18});   // R37: risiko 1% per trade (keputusan pengguna)
   const RULES_TTL_MS=24*3600*1000;
 
   // ---------- desimal ----------
@@ -89,7 +89,9 @@
   }
 
   /* Rencana siap salin untuk satu record/posisi PRD.
-     input: {symbol, side, entry, stop, target} (float64 PRD §6), settings (sudah divalidasi atau mentah), rules pair|null.
+     input: {symbol, side, entry, stop, target, target2?, tp1Frac?} (float64 PRD §6), settings, rules pair|null.
+     R37: bila target2 ada → qty dibagi: qtyTp1 = floor(qty·tp1Frac) ke stepSize, qtyTp2 = sisa (bilangan bulat step);
+     kedua bagian wajib ≥ minQty dan ≥ min notional pair, bila tidak → NOT_EXECUTABLE (SPLIT_BELOW_MIN).
      status: NO_PLAN · NEED_SETTINGS · INVALID_SETTINGS · PAIR_NOT_TRADING · NOT_EXECUTABLE · READY · UNROUNDED. */
   function plan(p,settingsRaw,rules){
     const base={symbol:p&&p.symbol,side:p&&p.side,rounded:false,reasons:[]};
@@ -97,39 +99,47 @@
     const st=validateSettings(settingsRaw);
     if(!st.ok)return Object.assign(base,{status:st.errors.capital==='EMPTY'&&Object.keys(st.errors).length===1?'NEED_SETTINGS':'INVALID_SETTINGS',errors:st.errors});
     const rank=rules&&Number.isInteger(rules.rank)?rules.rank:null,s=p.side==='LONG'?1:-1,mmr=mmrOf(p.symbol,rank);
-    let entry,stop,target,priceStr,distUnits=null,scale=1;
+    const two=fin(p.target2)&&p.target2>0,f=two?(fin(p.tp1Frac)&&p.tp1Frac>0&&p.tp1Frac<1?p.tp1Frac:0.5):1;
+    let entry,stop,target,target2=null,priceStr,distUnits=null,scale=1;
     const tg=rules?makeGrid(rules.tickSize):null,sg=rules?makeGrid(rules.stepSize):null;
     if(tg&&sg){
       // Arah pembulatan aman (R32.3 butir 2): entry tidak lebih mahal; stop menjauh dari entry; target mendekat ke entry.
       const e=snap(p.entry,tg,s===1?'down':'up'),sl=snap(p.stop,tg,s===1?'down':'up'),tp=snap(p.target,tg,s===1?'down':'up');
-      entry=e.num;stop=sl.num;target=tp.num;scale=tg.scale;distUnits=Math.abs(e.units-sl.units);
-      priceStr={entry:e.str,stop:sl.str,target:tp.str};
+      const tp2=two?snap(p.target2,tg,s===1?'down':'up'):null;
+      entry=e.num;stop=sl.num;target=tp.num;target2=tp2?tp2.num:null;scale=tg.scale;distUnits=Math.abs(e.units-sl.units);
+      priceStr={entry:e.str,stop:sl.str,target:tp.str,target2:tp2?tp2.str:null};
       base.rounded=true;
     }else{
-      entry=p.entry;stop=p.stop;target=p.target;priceStr=null;
+      entry=p.entry;stop=p.stop;target=p.target;target2=two?p.target2:null;priceStr=null;
     }
     const dist=distUnits!==null?distUnits/scale:Math.abs(entry-stop);
-    const geomOk=s===1?(stop>0&&stop<entry&&target>entry):(stop>entry&&target<entry&&target>0);
-    if(!geomOk||!(dist>0))return Object.assign(base,{status:'NOT_EXECUTABLE',reasons:['PLAN_GEOMETRY'],entry,stop,target,priceStr});
+    const geomOk=(s===1?(stop>0&&stop<entry&&target>entry):(stop>entry&&target<entry&&target>0))&&(!two||(s===1?target2>target:target2<target&&target2>0));
+    if(!geomOk||!(dist>0))return Object.assign(base,{status:'NOT_EXECUTABLE',reasons:['PLAN_GEOMETRY'],entry,stop,target,target2,priceStr});
     const cost=st.costBps/1e4;
     const lossPerUnit=dist+cost*Math.max(entry,stop);                 // rugi di SL + biaya round-trip (konservatif)
     const gainPerUnit=Math.abs(target-entry)-cost*Math.max(entry,target);
+    const gain2PerUnit=two?Math.abs(target2-entry)-cost*Math.max(entry,target2):null;
     const budget=st.capital*st.riskPct/100;
     const qtyRaw=budget/lossPerUnit;
     let qty,qtyStr=null;
-    if(sg){const q=snap(qtyRaw,sg,'down');qty=q.num;qtyStr=q.str;}else qty=qtyRaw;
+    let qty1=null,qty2=null,qty1Str=null,qty2Str=null;
+    if(sg){const q=snap(qtyRaw,sg,'down');qty=q.num;qtyStr=q.str;
+      if(two){const a=snap(q.num*f,sg,'down'),bU=q.units-a.units;qty1=a.num;qty1Str=a.str;qty2=bU/sg.scale;qty2Str=(bU/sg.scale).toFixed(sg.dec);}}
+    else{qty=qtyRaw;if(two){qty1=qty*f;qty2=qty-qty1;}}
     const stopFrac=dist/entry,lev=safeLeverage(stopFrac,p.symbol,rank);
     const liqFrac=1/lev-mmr;
     const notional=qty*entry,margin=notional/lev;
-    const out=Object.assign(base,{entry,stop,target,priceStr,qty,qtyStr,qtyRaw,budget,
-      lossAtStop:qty*lossPerUnit,lossPctCapital:100*qty*lossPerUnit/st.capital,gainAtTarget:qty*gainPerUnit,
-      rr:Math.abs(target-entry)/dist,stopPct:100*stopFrac,leverage:lev,mmr,liqPct:100*liqFrac,
+    const out=Object.assign(base,{entry,stop,target,target2,split:two,tp1Frac:f,priceStr,qty,qtyStr,qtyRaw,qty1,qty2,qty1Str,qty2Str,budget,
+      lossAtStop:qty*lossPerUnit,lossPctCapital:100*qty*lossPerUnit/st.capital,
+      gainAtTarget:two?qty1*gainPerUnit:qty*gainPerUnit,gainAtTarget2:two?qty1*gainPerUnit+qty2*gain2PerUnit:null,
+      rr:Math.abs(target-entry)/dist,rr2:two?Math.abs(target2-entry)/dist:null,stopPct:100*stopFrac,leverage:lev,mmr,liqPct:100*liqFrac,
       liqPrice:entry*(1-s*liqFrac),notional,margin,settings:{capital:st.capital,riskPct:st.riskPct,costBps:st.costBps}});
     if(rules&&rules.status&&rules.status!=='TRADING'){out.status='PAIR_NOT_TRADING';out.reasons.push('PAIR_NOT_TRADING');return out;}
     if(!out.rounded){out.status='UNROUNDED';return out;}
     if(!(qty>0)||qty<rules.minQty-1e-12)out.reasons.push('BELOW_MIN_QTY');
     if(qty>rules.maxQty)out.reasons.push('ABOVE_MAX_QTY');
     if(notional<rules.minNotional)out.reasons.push('BELOW_MIN_NOTIONAL');
+    if(two&&qty>0&&(qty1<rules.minQty-1e-12||qty2<rules.minQty-1e-12||qty1*entry<rules.minNotional||qty2*entry<rules.minNotional))out.reasons.push('SPLIT_BELOW_MIN');
     if(margin>st.capital)out.reasons.push('MARGIN_EXCEEDS_CAPITAL');
     out.status=out.reasons.length?'NOT_EXECUTABLE':'READY';
     return out;
@@ -138,6 +148,6 @@
   const STATUS_TEXT={READY:'Siap salin',UNROUNDED:'Belum dibulatkan — aturan pair tidak tersedia',NEED_SETTINGS:'Isi modal untuk melihat rencana siap salin',
     INVALID_SETTINGS:'Pengaturan tidak valid',NOT_EXECUTABLE:'Tidak bisa dieksekusi dengan modal ini',PAIR_NOT_TRADING:'Pair tidak sedang diperdagangkan',NO_PLAN:'Rencana belum tersedia'};
   const REASON_TEXT={BELOW_MIN_QTY:'qty di bawah minimum pair',ABOVE_MAX_QTY:'qty di atas maksimum pair',BELOW_MIN_NOTIONAL:'notional di bawah minimum pair',
-    MARGIN_EXCEEDS_CAPITAL:'margin melebihi modal',PLAN_GEOMETRY:'urutan harga SL/entry/TP tidak sah setelah pembulatan',PAIR_NOT_TRADING:'status pair bukan TRADING'};
+    MARGIN_EXCEEDS_CAPITAL:'margin melebihi modal',SPLIT_BELOW_MIN:'qty TP1/TP2 (dibagi dua) di bawah minimum pair — naikkan modal',PLAN_GEOMETRY:'urutan harga SL/entry/TP tidak sah setelah pembulatan',PAIR_NOT_TRADING:'status pair bukan TRADING'};
   return {MMR,MAX_LEV,TOP_TIER,LIMITS,DEFAULTS,RULES_TTL_MS,decimalsOf,makeGrid,snap,parseRules,validateSettings,safeLeverage,plan,mmrOf,STATUS_TEXT,REASON_TEXT};
 });

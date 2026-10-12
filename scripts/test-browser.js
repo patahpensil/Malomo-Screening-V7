@@ -39,6 +39,11 @@ const LEDGER=LG.load(JSON.parse(SEED_JSON));LG.freeze(LEDGER,VIEW.history,{regim
 LG.resolve(LEDGER,CANDLES,NOW);
 const CURRENT=Object.values(LEDGER.entries).filter(e=>e.decisionMs===T);
 const ACTIVE=LG.active(LEDGER,NOW),FINISHED=LG.finished(LEDGER);
+// R37 panel risiko (hitungan independen dari jurnal): posisi aktif, risiko terbuka, drawdown dari puncak, hasil kumulatif.
+function riskOf(rp){const act=ACTIVE,open=act.filter(x=>x.outcome.code==='OPEN');
+  const openRiskPct=open.reduce((s,x)=>s+(x.outcome.tp1AtMs?1-x.tp1Frac:1),0)*rp;
+  let cum=0,peak=0;for(const x of FINISHED.filter(x=>Number.isFinite(x.outcome.r)&&Number.isFinite(x.outcome.atMs)).sort((a,b)=>a.outcome.atMs-b.outcome.atMs)){cum+=x.outcome.r*rp;peak=Math.max(peak,cum);}
+  return {positions:act.length,openRiskPct,ddPct:peak-cum,cumPct:cum};}
 const coreOnly=Cy.buildState({rawBySymbol:Object.fromEntries(C.PAIRS.map(s=>[s,RAW[s].filter(k=>k[0]<=NOW).slice(-1500).map(Cy.toCandle)])),now:NOW,frozen:FROZEN});
 
 // exchangeInfo tiruan (format resmi: filter terpisah) untuk rencana siap salin R32.
@@ -132,6 +137,14 @@ const nav=async(page,viewport,screen)=>{await page.locator((viewport.width<768?'
           assert.equal(await card.locator('[data-score="m1m2q"]').innerText(),C.display2(en.scores.m1m2q).toFixed(2)+' / 180');
           const t=await card.innerText();for(const k of ['skor dikunci','OPEN INTEREST','CVD (TAKER)','ORDERBOOK','INVALIDASI','Rencana siap salin'])assert(t.includes(k),'kartu tanpa '+k);}
         assert.equal(await page.locator('#dec-list [data-exec-status="NEED_SETTINGS"]').count(),ACTIVE.length);
+        // R37: setiap kartu menampilkan TP1 & TP2 (mandat LIVE) dan panel risiko = hitungan dari jurnal (risiko default 1%).
+        for(let i=0;i<ACTIVE.length;i++){const lv=await page.locator('#dec-list .dec-card').nth(i).locator('.dec-lv').innerText();assert(lv.includes('TP1')&&lv.includes('TP2'),'kartu tanpa TP1/TP2');assert(Number.isFinite(ACTIVE[i].target2));}
+        const RK=riskOf(1);
+        assert.equal(await page.locator('[data-risk="positions"] .v').innerText(),`${RK.positions} / 10`);
+        assert.equal(await page.locator('[data-risk="open"] .v').innerText(),RK.openRiskPct.toFixed(1)+'%');
+        assert.equal(await page.locator('[data-risk="dd"] .v').innerText(),RK.ddPct.toFixed(1)+'%');
+        assert.equal(await page.locator('[data-risk="cum"] .v').innerText(),(RK.cumPct>=0?'+':'')+RK.cumPct.toFixed(1)+'%');
+        assert((await page.locator('[data-risk-panel]').innerText()).includes('tidak memblokir'));
         assert((await page.locator('#health').innerText()).includes('Data lengkap'));
         assert.equal(await page.locator('[data-universe]').getAttribute('data-universe'),String(UNIVERSE.length));
         await page.waitForFunction(()=>!/menyambung|memuat/.test(document.querySelector('#dec-list .dec-card .dec-data').innerText),null,{timeout:20000});
@@ -153,10 +166,15 @@ const nav=async(page,viewport,screen)=>{await page.locator((viewport.width<768?'
         assert((await page.locator('#exec-save-status').innerText()).includes('Tersimpan'));
         assert.equal(JSON.parse(await page.evaluate(()=>localStorage.getItem('malomo_v7_exec'))).capital,SET.capital);
         await page.waitForSelector('#dec-list [data-exec-status="READY"],#dec-list [data-exec-status="NOT_EXECUTABLE"]',{timeout:10000});
-        for(let i=0;i<ACTIVE.length;i++){const en=ACTIVE[i],pl=X.plan({symbol:en.symbol,side:en.side,entry:en.entry,stop:en.stop,target:en.target},SET,RULES[en.symbol]),card=page.locator('#dec-list .dec-card').nth(i);
+        let split=0;
+        for(let i=0;i<ACTIVE.length;i++){const en=ACTIVE[i],pl=X.plan({symbol:en.symbol,side:en.side,entry:en.entry,stop:en.stop,target:en.target,target2:en.target2,tp1Frac:en.tp1Frac},SET,RULES[en.symbol]),card=page.locator('#dec-list .dec-card').nth(i);
           assert.equal(await card.locator('.exec').getAttribute('data-exec-status'),pl.status,en.symbol);if(pl.status!=='READY')continue;
-          for(const k of ['entry','stop','target']){const v=await card.locator(`[data-exv="${k}"]`).innerText();assert.equal(v,pl.priceStr[k]);assert(isMultiple(v,TICK[en.symbol]));}
+          for(const k of ['entry','stop','target','target2']){const v=await card.locator(`[data-exv="${k}"]`).innerText();assert.equal(v,pl.priceStr[k]);assert(isMultiple(v,TICK[en.symbol]));}
+          assert.equal(await card.locator('[data-exv="qty1"]').innerText(),pl.qty1Str);assert.equal(await card.locator('[data-exv="qty2"]').innerText(),pl.qty2Str);split++;
           assert.equal(await card.locator('[data-exv="qty"]').innerText(),pl.qtyStr);assert.equal(await card.locator('[data-exv="lev"]').innerText(),pl.leverage+'×');}
+        assert(split>0,'tidak ada rencana TP1/TP2 READY yang diuji');
+        // Panel risiko memakai risiko tersimpan (0,75%).
+        assert.equal(await page.locator('[data-risk="open"] .v').innerText(),riskOf(Number(SET.riskPct)).openRiskPct.toFixed(1)+'%');
         await page.reload();await page.waitForSelector('#dec-list .dec-card');await page.waitForFunction(()=>MalomoApp.app.state,null,{timeout:30000});assert.equal(await page.locator('.exec-form [data-exec="capital"]').inputValue(),SET.capital);
         assert.equal(await page.locator('#exec-save-status').getAttribute('data-save'),'saved','setelah reload tetap tersimpan');
         assert.equal(await page.locator('[data-save-badge]').getAttribute('data-save-badge'),'saved','status simpan terlihat di judul form walau form tertutup');
@@ -177,7 +195,7 @@ const nav=async(page,viewport,screen)=>{await page.locator((viewport.width<768?'
         await nav(page,viewport,'jurnal');await page.waitForSelector('[data-jstat="n"]');
         const sm=LG.summary(FINISHED);
         assert.equal(await page.locator('[data-jstat="n"] .v').innerText(),String(sm.n));assert.equal(await page.locator('[data-jstat="tp"] .v').innerText(),String(sm.TARGET_HIT));
-        assert.equal(await page.locator('[data-jstat="sl"] .v').innerText(),String(sm.STOP_HIT));assert.equal(await page.locator('[data-jstat="avg"] .v').innerText(),(sm.avgR>=0?'+':'')+sm.avgR.toFixed(3));
+        assert.equal(await page.locator('[data-jstat="sl"] .v').innerText(),String(sm.STOP_HIT));assert.equal(await page.locator('[data-jstat="tp1"] .v').innerText(),String(sm.TP1_STOP+sm.TP1_HORIZON));assert.equal(await page.locator('[data-jstat="avg"] .v').innerText(),(sm.avgR>=0?'+':'')+sm.avgR.toFixed(3));
         assert.equal(await page.locator('tr[data-jrow]').count(),Math.min(300,FINISHED.length));
         await page.selectOption('[data-jf="outcome"]','STOP_HIT');assert.equal(await page.locator('tr[data-jrow]').count(),Math.min(300,FINISHED.filter(x=>x.outcome.code==='STOP_HIT').length));
         const [dl]=await Promise.all([page.waitForEvent('download'),page.locator('[data-action="download-journal"]').click()]);

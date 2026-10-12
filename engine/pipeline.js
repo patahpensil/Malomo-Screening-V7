@@ -38,8 +38,8 @@
   /* Satu siklus keputusan pada T (= close candle t = decision_available_utc).
      analyses: Map simbol → analyzeSymbol(...). entryOpen(symbol) → open candle t+1 atau null (fase CLOSE_CANDIDATE).
      provider: M2.provider(...). portfolio: {positions}. log: array tujuan catatan audit. */
-  function decide(T,analyses,{provider,portfolio={positions:[]},entryOpen=()=>null,log=[],pairs=PAIRS,closes=null}={}){
-    const tOpen=T-H4,records=[],conflictLogs=[];
+  function decide(T,analyses,{provider,portfolio={positions:[]},entryOpen=()=>null,log=[],pairs=PAIRS,closes=null,mandate=R.MANDATE}={}){
+    const tOpen=T-H4,records=[],conflictLogs=[],MD=mandate;   // mandat risiko: riset (default) atau LIVE (R37)
     // M3 sekali per timestamp (konteks bersama). `closes` boleh diberikan pemanggil (peta yang sama) agar replay tidak membangun ulang tiap T.
     if(!closes){closes=new Map();for(const [s,a] of analyses)closes.set(s,new Map(a.c.map(x=>[x.t,x.close])));}
     const m3=R.m3(closes,tOpen,pairs);
@@ -59,7 +59,7 @@
       conflictLogs.push(entry);log.push({type:'CONFLICT_CHECK',...entry});
       const m1=a.m1At(i);
       for(const u of uniq){
-        const ev=u.ev,rec=baseRecord(ev,a,T,m1);
+        const ev=u.ev,rec=baseRecord(ev,a,T,m1,MD);
         rec.source_labels=[ev.family];rec.duplicate_count=u.dup;
         if(conflict||fams[ev.side].size>1){
           const st=conflict?'CONFLICTING_DIRECTIONS':'MULTI_METHOD_COLLISION';
@@ -101,12 +101,12 @@
     for(const r of cands){
       const open=entryOpen(r.symbol);
       if(!fin(open))continue;                        // tetap CLOSE_CANDIDATE, harga null
-      const pl=R.plan(r.side,open,r._atrEntry),chk=R.check(r.symbol,pl,pf);
-      Object.assign(r,{entry_reference_open:open,atr_entry:r._atrEntry,stop_price:pl.stop,target_price:pl.target,qty:pl.ok?pl.qty:null,
+      const pl=R.plan(r.side,open,r._atrEntry,MD),chk=R.check(r.symbol,pl,pf,MD);
+      Object.assign(r,{entry_reference_open:open,atr_entry:r._atrEntry,stop_price:pl.stop,target_price:pl.target,target2_price:pl.target2??null,qty:pl.ok?pl.qty:null,
         risk_pct:pl.ok?pl.riskPct:null,gross_pct:pl.ok?pl.grossPct:null});
       if(chk.m4===100){
         r.status='ENTRY_CONSIDER';r.scores.m4_100=100;r.scores.m6_confluense_500=r._m6;r.scores.m6_display_pct_not_winrate=r._m6/5;
-        pf={positions:[...pf.positions,{symbol:r.symbol,side:r.side,entryMs:T,slotReleaseMs:T+R.MANDATE.holdMs,risk:pl.risk,notional:pl.notional,entry:open,stop:pl.stop,target:pl.target}]};
+        pf={positions:[...pf.positions,{symbol:r.symbol,side:r.side,entryMs:T,slotReleaseMs:T+MD.holdMs,risk:pl.risk,notional:pl.notional,entry:open,stop:pl.stop,target:pl.target,target2:pl.target2??null}]};
       }else{r.status='REJECTED_RISK';r.scores.m4_100_audit_partial=chk.m4;r.reasons=chk.reasons;}
     }
     for(const r of records){delete r._m6pre;delete r._m6;delete r._m1;delete r._q80;delete r._atrEntry;}
@@ -119,7 +119,7 @@
   }
   const allScored=(m1,q,m3)=>m1.status==='SCORED'&&q.status==='SCORED'&&m3.status==='SCORED';
 
-  function baseRecord(ev,a,T,m1){
+  function baseRecord(ev,a,T,m1,M=R.MANDATE){
     const c=a.c;
     return {schema:SCHEMA,event_status:'CONFIRMED',score_status:null,status:null,reasons:[],research_only:true,synthetic_fixture:false,
       venue:'BINANCE_USDM_FUTURES',symbol:ev.symbol,timeframe:'4h',
@@ -127,9 +127,9 @@
       side:ev.side,signal_family:ev.family,market_structure_direction:m1.direction,m1_origin_direction:ev.family==='REVERSAL_RETEST'?ev.m1Origin:null,
       scores:{m1_100:m1.score,m1_components:m1.components,m2_signal_quality_80:null,m2_integrity_20:null,m2_100:null,m3_100:null,m4_100:null,m5_100:null,
         m6_confluense_500:null,m6_display_pct_not_winrate:null,m1_plus_m2q_0_180_display_only:null},
-      equity_sim:R.MANDATE.equity,atr_entry:null,atr_frozen:ev.atrFrozen??null,entry_reference_open:null,stop_price:null,target_price:null,qty:null,
-      risk_pct:null,gross_pct:null,rr_target:R.MANDATE.rr,max_holding_hours:24,invalidation:invalidationOf(ev,c),
-      normalization_version:null,risk_mandate_version:R.MANDATE.version,m5_snapshot:R.M5.snapshot,m5_scope:R.M5.scope,score_version:SCORE_VERSION,
+      equity_sim:M.equity,atr_entry:null,atr_frozen:ev.atrFrozen??null,entry_reference_open:null,stop_price:null,target_price:null,target2_price:null,qty:null,
+      risk_pct:null,gross_pct:null,rr_target:M.rr,rr_target2:M.rr2??null,tp1_fraction:M.tp1Frac??1,max_holding_hours:M.holdMs/3600000,invalidation:invalidationOf(ev,c),
+      normalization_version:null,risk_mandate_version:M.version,m5_snapshot:R.M5.snapshot,m5_scope:R.M5.scope,score_version:SCORE_VERSION,
       data_quality_flags:a.flags.map(f=>f.reason),source_labels:[ev.family],audit_trail:[]};
   }
 
@@ -146,7 +146,7 @@
 
   /* Replay arsip: semua T dalam [startMs, endMs]. trainEndMs: event dengan T ≤ trainEndMs dinilai ECDF prior-only
      (riwayat event CONFIRMED keluarga sama, waktu ketat lebih awal, ≥ 30), setelahnya array beku. */
-  function replay(candlesBySymbol,{frozen,trainEndMs=null,startMs,endMs,pairs=PAIRS}){
+  function replay(candlesBySymbol,{frozen,trainEndMs=null,startMs,endMs,pairs=PAIRS,mandate=R.MANDATE}){
     const analyses=new Map();for(const s of pairs)analyses.set(s,analyzeSymbol(s,candlesBySymbol[s],Infinity,{archive:true}));
     const history=[],prov=M2.provider({frozen,trainEndMs,history:trainEndMs===null?null:history});
     const times=new Set();for(const [,a] of analyses)for(const x of a.c)times.add(x.t+H4);
@@ -154,7 +154,7 @@
     let portfolio={positions:[]};const out=[],log=[],closes=closesOf(analyses);
     for(const T of Ts){
       const entryOpen=s=>{const a=analyses.get(s),k=a.idxOf.get(T);return k===undefined?null:a.c[k].open;};
-      const res=decide(T,analyses,{provider:prov,portfolio,entryOpen,log,pairs,closes});
+      const res=decide(T,analyses,{provider:prov,portfolio,entryOpen,log,pairs,closes,mandate});
       portfolio=res.portfolio;out.push(...res.records);
       // Riwayat kalibrasi prior-only: seluruh event CONFIRMED (sebelum kanonisasi) dengan fitur lengkap.
       if(trainEndMs!==null&&T<=trainEndMs)for(const [,a] of analyses){

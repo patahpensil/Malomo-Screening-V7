@@ -252,3 +252,8 @@ td.pos{color:var(--long);} td.neg{color:var(--short);}
 .save-st.ok{border-color:var(--long);color:var(--long);}
 .save-st.warn{border-color:var(--warn);color:var(--warn);}
 .save-st.bad{border-color:var(--reject);color:#f2a29d;}
+/* R37 panel risiko portofolio + TP1/TP2 */
+.risk-panel{margin-bottom:12px;}
+.stat.rk.warn{border-color:var(--warn);} .stat.rk.warn .v{color:var(--warn);}
+.stat.rk.reject{border-color:var(--reject);} .stat.rk.reject .v{color:var(--reject);}
+.dec-prog .mark.tp1{background:var(--long);opacity:.8;}

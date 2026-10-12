@@ -1,6 +1,6 @@
 # PRD FINAL — ENAM METODOLOGI TRADING BERBOBOT & M6 CONFLUENSE
 
-**Versi:** 1.0.14-FINAL-DESIGN (revisi konsistensi dokumen atas 1.0.0; lihat Riwayat revisi)  
+**Versi:** 1.0.15-FINAL-DESIGN (revisi konsistensi dokumen atas 1.0.0; lihat Riwayat revisi)  
 **Tanggal keputusan:** 10 Oktober 2026  
 **Bahasa spesifikasi:** Indonesia; nama field dan status Inggris untuk kontrak antar-agen.  
 **Ruang lingkup:** spesifikasi metodologi penelitian dan protokol keluaran agen; **bukan permintaan membuat aplikasi, mengirim order, commit, push, atau deploy**.  
@@ -28,6 +28,7 @@
 | 1.0.12 | 11 Okt 2026 | §17 baru, keputusan pengguna: (R34) universe aplikasi live = **100 pair USDT perpetual dengan volume harian tertinggi**, ranking ditetapkan setiap close candle harian 00:00 UTC (08:00 WITA), berlaku sebagai **hard gate** sampai close harian berikutnya; basket M3 tetap enam pair §1; tidak ada perubahan bobot atau rumus skor. Penyesuaian R32: alt di luar 30 besar memakai asumsi MMR 2,5% dan batas leverage 20×. | **Cakupan pair aplikasi**; rumus dan bobot M1–M6, generator, gate keputusan, kontrak §10, dan portofolio §6 tidak berubah |
 | 1.0.13 | 12 Okt 2026 | §18 baru, keputusan pengguna (Tahap 1): (R35) aplikasi menjadi tiga layar — **Decision** (hard gate = status layak dipertimbangkan, skor dikunci saat masuk), **Semua Pair** (universe realtime + M1 per pair), **Jurnal Sinyal** (hasil SL/TP/horizon + unduh CSV); universe 100 pair kini **realtime** dari volume 24 jam berjalan (stream publik), gate keputusan memakai snapshot universe pada close 4H; layar riset lama, inspektor, dan unduh log audit dihapus. Perbaikan: pair penentu yang gagal diunduh sejak percobaan pertama kini tetap menahan keputusan (§1). | **Lapisan tampilan & cakupan data**; rumus dan bobot M1–M6, generator, gate keputusan, kontrak §10, dan portofolio §6 tidak berubah. Referensi UI/UX enam layar digantikan §18 |
 | 1.0.14 | 12 Okt 2026 | Koreksi pengguna atas §18: (R36) Jurnal hanya mencatat sinyal yang **benar-benar masuk Decision** pada close berjalan saat aplikasi aktif — sinyal masa lalu dari replay tidak dicatat dan entri replay versi 1.0.13 dibuang saat dimuat; pengaturan modal/risiko/biaya hanya berlaku setelah tombol **Simpan** ditekan, dengan status tersimpan/belum disimpan yang selalu terlihat. | Lapisan tampilan; rumus dan bobot tidak berubah |
+| 1.0.15 | 12 Okt 2026 | §19 baru, keputusan pengguna untuk penggunaan uang nyata: (R37) **mandat risiko LIVE** aplikasi — maksimal **10 posisi** bersamaan, risiko **1% per trade**, risiko terbuka ≤ **10%**, **batas notional (gross) dihapus**, exit **TP1 = 2R (tutup 50%) + TP2 = 3R (sisa 50%)**, SL tetap di tempat setelah TP1, horizon 24 jam tetap; panel risiko portofolio (peringatan saja); rencana siap salin menampilkan TP1/TP2 dengan qty dibagi; perbaikan hasil jurnal (data yang belum terunduh tidak lagi menjadi "data tidak ada"). Mandat riset §6 tetap dipakai untuk reproduksi riset. Hasil uji data asli 2024–2026 dicatat apa adanya (§19.2), termasuk bahwa 10 posisi lebih buruk daripada 3 posisi dalam backtest. | **Bobot, rumus skor M1–M6, rumus M4, gate, dan ranking TIDAK berubah** (diuji: skor identik di kedua mandat) |
 
 ## 0. Hirarki kewenangan dan larangan interpretasi
 
@@ -850,3 +851,84 @@ Layar Siklus 4H (tabel kandidat), inspektor beserta tab Skor/Rencana/Audit/JSON,
 1. **Jurnal = hanya sinyal yang masuk Decision.** Ledger membekukan record layak dipertimbangkan **hanya untuk close yang sedang berjalan** saat aplikasi menghitungnya. Sinyal close sebelumnya yang terlihat lewat replay tidak dicatat. Konsekuensinya: bila aplikasi tidak dibuka selama satu siklus 4H, sinyal siklus itu tidak tercatat. Entri berlabel replay dari versi 1.0.13 dibuang saat dimuat; kolom dan filter "sumber" dihapus.
 2. **Simpan pengaturan.** Isian modal, risiko, dan biaya disimpan ke draf saat diketik dan **baru berlaku setelah tombol Simpan ditekan** serta lolos validasi §16.1. Status selalu terlihat — di judul form (badge) dan di bawah tombol: tersimpan (beserta nilai dan waktunya), belum disimpan, belum ada pengaturan, isian tidak sah (tidak disimpan), atau gagal menyimpan di browser. Tombol Batalkan mengembalikan draf ke nilai tersimpan.
 3. **Tes:** ledger (hanya close berjalan, migrasi entri replay, hasil = engine bila aplikasi selalu terbuka); browser (isian tidak sah tidak tersimpan, status belum disimpan, rencana tetap memakai nilai tersimpan sampai Simpan ditekan, status tetap setelah reload, pertama dibuka tanpa replay, migrasi).
+
+## 19. Mandat risiko LIVE, TP1/TP2, dan panel risiko portofolio (v1.0.15)
+
+Keputusan pengguna 12 Oktober 2026 untuk penggunaan uang nyata. Bagian ini **tidak mengubah** bobot Tabel 1, rumus M1–M6, rumus M4 (`40·D + 35·P + 25·N`), gate arah/integritas/bentrok, ataupun ranking M6. Yang berubah hanya parameter kapasitas portofolio dan aturan exit yang dipakai aplikasi live.
+
+### 19.1 R37 — Mandat risiko LIVE
+
+| Parameter | Mandat riset §6 (`RESEARCH_1_3_1X_V1`, tetap untuk reproduksi riset) | Mandat LIVE aplikasi (`LIVE_10P_1PCT_TP2R3R_V1`) |
+|---|---|---|
+| Posisi bersamaan maksimal | 3 | **10** |
+| Risiko per trade | 1% | **1%** |
+| Risiko terbuka maksimal | 3% | **10%** |
+| Batas notional total / per posisi | 100% ekuitas | **dihapus** (qty = 1% ekuitas ÷ jarak stop) |
+| Stop | 1,5 × ATR_entry | 1,5 × ATR_entry |
+| Take profit | 2R (seluruh posisi) | **TP1 = 2R (tutup 50%) + TP2 = 3R (tutup 50% sisa)** |
+| Stop setelah TP1 | — | **tetap di tempat** (tidak dipindah ke entry) |
+| Horizon / slot | 24 jam | 24 jam |
+
+1. Bila lebih dari 10 sinyal lolos gate pada close yang sama, alokasi tetap berurutan menurut ranking M6 §8.1.5; 10 adalah batas, bukan target. Sinyal yang tidak kebagian slot tetap berstatus `REJECTED_RISK` dengan reason `POSITION_OR_RISK_CAP` atau `PAIR_ACTIVE`. Reason `GROSS_CAP` tidak muncul lagi di mandat LIVE.
+2. Record keputusan memuat `target2_price`, `rr_target2`, `tp1_fraction`, dan `risk_mandate_version`. `target_price` = TP1.
+3. **Hasil (outcome) TP1/TP2**, dihitung dari candle 4H yang sudah close dan dievaluasi stop lebih dahulu pada candle yang sama:
+   - `STOP_HIT`: SL sebelum TP1, −1R.
+   - `TP1_STOP`: TP1 lalu SL, 0,5·2 − 0,5·1 = **+0,5R**.
+   - `TARGET_HIT`: TP1 lalu TP2 (boleh pada candle yang sama), 0,5·2 + 0,5·3 = **+2,5R**.
+   - `TP1_HORIZON`: TP1 lalu keluar pada close candle ke-6.
+   - `HORIZON_EXIT`: keluar pada close candle ke-6 tanpa TP1.
+   
+   Entri jurnal lama tanpa TP2 tetap dinilai dengan aturan TP tunggal.
+4. **Rencana siap salin** (R32): TP2 dibulatkan ke `tickSize` ke arah aman (mendekat ke entry). Qty total dibagi dua: qty TP1 = floor(qty × 50%) ke `stepSize`, qty TP2 = sisa. Kedua bagian wajib memenuhi qty minimum dan notional minimum pair; bila tidak, statusnya `NOT_EXECUTABLE` dengan alasan `SPLIT_BELOW_MIN`. Rugi bila SL kena (termasuk biaya) tetap ≤ risiko yang diisi pengguna. Risiko default pengaturan = 1%.
+5. **Panel risiko portofolio** di layar Decision. Panel ini hanya peringatan: tidak memblokir sinyal, tidak mengubah skor, dan tidak ada kill switch. Isinya:
+   - posisi aktif / 10;
+   - risiko terbuka, yaitu jumlah bagian posisi yang masih menanggung SL × risiko tersimpan, dibanding batas 10%;
+   - drawdown dari puncak kurva hasil kumulatif jurnal (tanpa kompaun), dibanding titik evaluasi 20% dan batas rugi 50% yang ditetapkan pengguna;
+   - hasil kumulatif jurnal.
+   
+   Semua angka dihitung dari jurnal Decision dengan anggapan setiap sinyal diambil. Ini bukan saldo akun Binance.
+6. **Perbaikan hasil jurnal.** Pair yang hasilnya belum final tetap diunduh walaupun keluar dari 100 besar atau slot 24 jamnya sudah lewat. Status "data tidak ada" hanya diberikan bila candle di jendela 24 jam memang hilang padahal data sudah melewati jendela itu, atau entry lebih tua dari jangkauan unduhan (≈240 hari). Data yang sekadar belum terunduh tidak lagi menjadi "data tidak ada" setelah 48 jam.
+
+### 19.2 Hasil uji data asli sebelum keputusan (dicatat apa adanya)
+
+Uji memakai kline 4H dan funding asli Binance, Februari 2024 – Oktober 2026, 30 pair paling likuid + 6 pair inti, ranking M6, risiko 1%, hasil dijumlahkan tanpa kompaun (% ekuitas). Pengecekan alat: baris "sekarang" identik dengan Tahap A §14.
+
+| Aturan (biaya 9 bps) | Trade | R rata-rata | Total | Drawdown maks | Hari terburuk |
+|---|---|---|---|---|---|
+| 3 posisi, TP 2R, gross ≤100% (mandat riset) | 2.234 | +0,032 | +72% | 36% | −3,1% |
+| 3 posisi, TP1 2R/TP2 3R 50/50, SL tetap | 2.320 | +0,035 | +81% | 46% | −3,2% |
+| 5 posisi, TP 2R | 3.443 | +0,000 | +1% | 81% | −5,3% |
+| 10 posisi, TP 2R | 4.880 | +0,003 | +13% | 121% | −10,4% |
+| **10 posisi, TP1 2R/TP2 3R 50/50, SL tetap (dipilih)** | 4.880 | +0,010 | +47% | 120% | −10,4% |
+| 10 posisi, TP1/TP2, SL pindah ke entry setelah TP1 | 4.880 | −0,005 | −24% | 127% | −10,4% |
+
+Dengan biaya 18 bps, semua varian 10 posisi negatif. Contohnya, aturan yang dipilih: R −0,014, total −68%, drawdown 163%. Per tahun, aturan yang dipilih menghasilkan 2024 +0,051R, 2025 +0,004R, dan 2026 −0,027R pada biaya 9 bps. Temuan ini disampaikan kepada pengguna sebelum keputusan; pengguna tetap memilih 10 posisi dengan syarat sinyal tetap melewati pembobotan dan gate yang sama. Drawdown di atas 50% berarti batas rugi pengguna terlampaui dalam backtest. Panel risiko (butir 5) menampilkan jarak ke batas itu secara langsung.
+
+Verifikasi engine aplikasi atas data yang sama:
+- mandat LIVE menghasilkan 4.880 sinyal Decision dengan **maksimal tepat 10 posisi** dan **risiko terbuka maksimal tepat 10%**;
+- jumlah sinyal identik dengan simulasi independen;
+- 2.010 sinyal yang ada di kedua mandat memiliki **skor identik (0 berbeda)**;
+- hasil jurnal (ledger) identik dengan hasil engine untuk seluruh 4.880 sinyal.
+
+### 19.3 Tes
+
+`scripts/test-app.js` (R37):
+- default aplikasi = mandat LIVE, dan mandat riset tidak berubah;
+- **pembobotan tidak berubah**: record, M1/M2/M3/M5, ranking, dan M6 identik dengan mandat riset;
+- portofolio LIVE: ≤10 posisi, risiko terbuka ≤10%, 1% per trade, tanpa `GROSS_CAP`, TP1 = 2R, TP2 = 3R, qty tanpa batas notional;
+- setara dengan replay engine bermandat LIVE;
+- outcome TP1/TP2 untuk LONG dan SHORT, plus posisi lama tanpa TP2.
+
+`scripts/test-exec.js`:
+- contoh manual TP1/TP2;
+- `SPLIT_BELOW_MIN` dan geometri;
+- 3.000 rencana acak: semua harga kelipatan tick, qty TP1 + TP2 = qty, rugi ≤ anggaran, urutan TP benar.
+
+`scripts/test-ledger.js`:
+- TP1/TP2 di jurnal (TP1 tercatat walau sisa berjalan, +0,5R / +2,5R, teks, kolom CSV);
+- aturan "data tidak ada" baru.
+
+`scripts/test-browser.js`:
+- kartu menampilkan TP1/TP2;
+- rencana TP1/TP2 = engine;
+- panel risiko = hitungan independen dari jurnal, untuk risiko default dan risiko tersimpan.

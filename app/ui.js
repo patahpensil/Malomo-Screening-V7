@@ -62,15 +62,47 @@
     if(pl.status==='NEED_SETTINGS'||pl.status==='INVALID_SETTINGS'||pl.status==='NO_PLAN')return h+`<div class="muted small">${pl.status==='NO_PLAN'?'Rencana belum tersedia.':'Isi pengaturan (modal, risiko, biaya) di bagian atas layar Decision.'}</div></div>`;
     const rd=pl.rounded,ps=pl.priceStr;
     const cell=(k,lab,str,num)=>`<div class="exv"><span>${e(lab)}</span><b class="mono" data-exv="${k}">${e(rd&&str?str:L.price(num))}</b>${rd&&str&&pl.status!=='PAIR_NOT_TRADING'?copyBtn(str,lab):''}</div>`;
-    h+=`<div class="exv-grid">${cell('entry','Entry limit',ps&&ps.entry,pl.entry)}${cell('stop','SL',ps&&ps.stop,pl.stop)}${cell('target','TP',ps&&ps.target,pl.target)}${cell('qty','Qty',pl.qtyStr,pl.qty)}</div>`;
+    const pc=Math.round(100*pl.tp1Frac);
+    h+=pl.split?`<div class="exv-grid">${cell('entry','Entry limit',ps&&ps.entry,pl.entry)}${cell('stop','SL',ps&&ps.stop,pl.stop)}${cell('target','TP1 (2R)',ps&&ps.target,pl.target)}${cell('target2','TP2 (3R)',ps&&ps.target2,pl.target2)}${cell('qty','Qty total',pl.qtyStr,pl.qty)}${cell('qty1','Qty TP1 ('+pc+'%)',pl.qty1Str,pl.qty1)}${cell('qty2','Qty TP2 ('+(100-pc)+'%)',pl.qty2Str,pl.qty2)}</div>`
+      :`<div class="exv-grid">${cell('entry','Entry limit',ps&&ps.entry,pl.entry)}${cell('stop','SL',ps&&ps.stop,pl.stop)}${cell('target','TP',ps&&ps.target,pl.target)}${cell('qty','Qty',pl.qtyStr,pl.qty)}</div>`;
     if(pl.reasons.length)h+=`<div class="warnbox" style="margin-top:8px">⚠ ${e(pl.reasons.map(x=>X.REASON_TEXT[x]||x).join(' · '))}</div>`;
     h+=`<dl class="kv exk"><dt>Leverage maks aman (perkiraan)</dt><dd data-exv="lev"><b>${e(String(pl.leverage))}×</b></dd>
       <dt>Margin pada ${e(String(pl.leverage))}×</dt><dd>${e(usdt(pl.margin))} · notional ${e(usdt(pl.notional))}</dd>
       <dt>Rugi bila SL kena</dt><dd data-exv="loss">${e(usdt(pl.lossAtStop))} (${e(L.pct(pl.lossPctCapital))} modal, termasuk biaya)</dd>
-      <dt>Untung bila TP kena</dt><dd>${e(usdt(pl.gainAtTarget))} setelah biaya · RR 1:${e(pl.rr.toFixed(2))}</dd>
+      ${pl.split?`<dt>Untung bila TP1 kena (${pc}% ditutup)</dt><dd>${e(usdt(pl.gainAtTarget))} setelah biaya · RR 1:${e(pl.rr.toFixed(2))}</dd>
+      <dt>Total bila TP2 juga kena</dt><dd data-exv="gain2">${e(usdt(pl.gainAtTarget2))} setelah biaya · RR 1:${e(pl.rr2.toFixed(2))} · SL tetap di tempat setelah TP1</dd>`
+      :`<dt>Untung bila TP kena</dt><dd>${e(usdt(pl.gainAtTarget))} setelah biaya · RR 1:${e(pl.rr.toFixed(2))}</dd>`}
       <dt>Jarak SL · likuidasi (perkiraan)</dt><dd>${e(pl.stopPct.toFixed(2))}% · ±${e(pl.liqPct.toFixed(2))}% (≈ ${e(L.price(pl.liqPrice))}, MMR asumsi ${e((pl.mmr*100).toFixed(1))}%)</dd></dl>`;
-    h+=`<div class="note">${rd?'':'Angka mentah, belum kelipatan tick — jangan disalin sebagai order. '}Set leverage di Binance ≤ ${e(String(pl.leverage))}×. Pasang limit order; bila tidak terisi, lewati — jangan kejar dengan market order. Rencana ini tidak mengirim order.</div></div>`;
+    h+=`<div class="note">${rd?'':'Angka mentah, belum kelipatan tick — jangan disalin sebagai order. '}Set leverage di Binance ≤ ${e(String(pl.leverage))}×. Pasang limit order; bila tidak terisi, lewati — jangan kejar dengan market order.${pl.split?' Pasang dua TP (qty TP1 dan qty TP2) dengan SL yang sama untuk seluruh qty.':''} Rencana ini tidak mengirim order.</div></div>`;
     return h;
+  }
+
+  // ---------- R37 panel risiko portofolio (peringatan saja, tidak memblokir, tidak mengubah skor) ----------
+  const LIMIT=Object.freeze({maxPositions:10,openRiskPct:10,ddEvalPct:20,ddMaxPct:50});
+  /* Angka panel dari jurnal Decision, dengan anggapan setiap sinyal Decision diambil dengan risiko tersimpan (default 1%).
+     risiko terbuka = Σ bagian posisi yang masih menanggung SL (1 sebelum TP1; 1−tp1Frac setelah TP1) × risiko%.
+     drawdown = jarak dari puncak kurva hasil kumulatif (Σ R × risiko%, urut waktu keluar), tanpa kompaun. */
+  function riskNumbers(ledger,now,riskPct){
+    const act=LG.active(ledger,now),open=act.filter(x=>!x.outcome||x.outcome.code==='OPEN');
+    const openRisk=open.reduce((s,x)=>s+(x.outcome&&x.outcome.tp1AtMs?1-(fin(x.tp1Frac)?x.tp1Frac:0.5):1),0)*riskPct;
+    const done=LG.finished(ledger).filter(x=>fin(x.outcome.r)&&fin(x.outcome.atMs)).sort((a,b)=>a.outcome.atMs-b.outcome.atMs);
+    let cum=0,peak=0;for(const x of done){cum+=x.outcome.r*riskPct;peak=Math.max(peak,cum);}
+    const longs=open.filter(x=>x.side==='LONG').length;
+    return {positions:act.length,open:open.length,longs,shorts:open.length-longs,openRiskPct:openRisk,cumPct:cum,ddPct:peak-cum,trades:done.length,riskPct};
+  }
+  function riskPanel(c){
+    const sv=X.validateSettings(c.ex?c.ex.settings:{}),rp=sv.ok?sv.riskPct:X.DEFAULTS.riskPct,k=riskNumbers(c.ledger,c.now,rp);
+    const ddTone=k.ddPct>=LIMIT.ddMaxPct?'reject':k.ddPct>=LIMIT.ddEvalPct?'warn':'primary';
+    const orTone=k.openRiskPct>LIMIT.openRiskPct+1e-9?'reject':k.openRiskPct>=0.7*LIMIT.openRiskPct?'warn':'primary';
+    const ddMsg=k.ddPct>=LIMIT.ddMaxPct?'⚠ Batas rugi 50% tercapai.':k.ddPct>=LIMIT.ddEvalPct?'⚠ Titik evaluasi −20%: berhenti sejenak, cek jurnal.':'';
+    const box=(key,label,val,sub,tone)=>`<div class="stat rk ${tone||''}" data-risk="${key}"><div class="k">${e(label)}</div><div class="v">${val}</div><div class="muted small">${sub}</div></div>`;
+    return `<div class="risk-panel" data-risk-panel><div class="cards">
+      ${box('positions','Posisi aktif',`${k.positions} / ${LIMIT.maxPositions}`,`${k.open} masih berjalan · ${k.longs} LONG · ${k.shorts} SHORT`)}
+      ${box('open','Risiko terbuka',`${k.openRiskPct.toFixed(1)}%`,`batas ${LIMIT.openRiskPct}% modal · ${rp}% per trade`,orTone)}
+      ${box('dd','Drawdown dari puncak',`${k.ddPct.toFixed(1)}%`,`evaluasi ${LIMIT.ddEvalPct}% · batas ${LIMIT.ddMaxPct}% · ${k.trades} sinyal selesai`,ddTone)}
+      ${box('cum','Hasil kumulatif jurnal',`${k.cumPct>=0?'+':''}${k.cumPct.toFixed(1)}%`,'modal, tanpa kompaun',k.cumPct>=0?'primary':'warn')}</div>
+      ${ddMsg?`<div class="warnbox" style="margin-top:8px" data-risk-warn>${e(ddMsg)}</div>`:''}
+      <div class="muted small" style="margin-top:6px">Peringatan saja — tidak memblokir sinyal dan tidak mengubah skor. Dihitung dari jurnal Decision dengan anggapan setiap sinyal diambil dengan risiko ${rp}%; bukan saldo akun Binance-mu.</div></div>`;
   }
 
   // ---------- Layar 1: Decision ----------
@@ -78,7 +110,7 @@
   function decisionCard(en,c){
     const {live,now,ex}=c,long=en.side==='LONG',tk=live.prices[en.symbol],px=tk?tk.price:NaN,d=live.data(en.symbol),risk=Math.abs(en.entry-en.stop);
     const R=px>0&&risk>0?(long?px-en.entry:en.entry-px)/risk:null;
-    const lo=Math.min(en.stop,en.target),hi=Math.max(en.stop,en.target),frac=v=>Math.max(0,Math.min(1,(v-lo)/(hi-lo)))*100,fromStop=v=>long?frac(v):100-frac(v);
+    const far=fin(en.target2)?en.target2:en.target,lo=Math.min(en.stop,far),hi=Math.max(en.stop,far),frac=v=>Math.max(0,Math.min(1,(v-lo)/(hi-lo)))*100,fromStop=v=>long?frac(v):100-frac(v);
     let oi='<div class="val">memuat…</div>';
     if(d.oi>0&&px>0){const chg=d.oiBase>0?(d.oi/d.oiBase-1)*100:null;oi=`<div class="val">${e(L.compactUsd(d.oi*px))}</div><div class="sub">${chg!==null?(chg>=0?'+':'')+chg.toFixed(2)+'% sejak dipantau':''}</div>`;}
     const c5=live.cvd5(en.symbol);
@@ -86,16 +118,16 @@
     const ob=d.imb!==undefined?`<div class="val">Bid ${Math.round((1+d.imb)*50)}% · Ask ${Math.round((1-d.imb)*50)}%</div><div class="sub">20 level · spread ${d.bid>0&&d.ask>0?((d.ask-d.bid)/d.bid*100).toFixed(3)+'%':'—'}</div>`:'<div class="val">menyambung…</div><div class="sub">menunggu snapshot orderbook</div>';
     const inv=en.invalidation,invWarn=inv&&px>0&&(inv.rule.startsWith('CLOSE_BELOW')?px<inv.price:inv.rule.startsWith('CLOSE_ABOVE')?px>inv.price:false);
     const o=en.outcome||{code:'OPEN'},release=en.entryMs+LG.HOLD,s=en.scores;
-    const oTxt=o.code==='OPEN'?`Berjalan · slot 24 jam lepas dalam ${L.durationShort(release-now)}`:`${LG.OUTCOME_TEXT[o.code]||o.code} ${L.time(o.atMs)}${fin(o.r)?' ('+(o.r>=0?'+':'')+o.r.toFixed(2)+'R)':''}`;
+    const oTxt=o.code==='OPEN'?`${o.tp1AtMs?'TP1 kena '+L.time(o.tp1AtMs)+' · sisa berjalan · ':'Berjalan · '}slot 24 jam lepas dalam ${L.durationShort(release-now)}`:`${LG.outcomeText(en)} ${L.time(o.atMs)}${fin(o.r)?' ('+(o.r>=0?'+':'')+o.r.toFixed(2)+'R)':''}`;
     return `<div class="dec-card ${e(en.side)}" data-dec="${e(en.key)}">
       <div class="dec-head"><span class="run-tag"><span class="run-dot"></span>${o.code==='OPEN'?'RUNNING':'SELESAI'}</span><span class="dec-sym">${e(en.symbol.replace(/USDT$/,''))}</span>${en.rank?`<span class="muted small">#${en.rank}</span>`:''}${side(en.side)}<span class="chip neutral">${e(L.FAMILY[en.family]||en.family)}</span>${regimeChip(en.regime)}
         <div class="dec-meta">keputusan ${e(L.time(en.decisionMs))} · ${e(L.date(en.decisionMs))}</div></div>
       <div class="dec-scores" data-locked="1"><div><span>M1 + M2q</span><b data-score="m1m2q">${sc(s.m1m2q,180)}</b></div><div><span>M6 (indeks)</span><b data-score="m6">${sc(s.m6,500)}</b></div><div><span>M1 Struktur</span><b>${sc(s.m1)}</b></div><div><span>M2 Kualitas</span><b>${sc(s.m2q)}</b></div><div class="lock" title="Skor dibekukan saat masuk Decision; refresh data tidak mengubahnya">🔒 skor dikunci</div></div>
       <div class="dec-price"><span class="px">${px>0?e(L.price(px)):'—'}</span><span class="rr ${fin(R)&&R>=0?'pos':'neg'}">${fin(R)?(R>=0?'+':'')+R.toFixed(2)+'R':'—'}</span></div>
-      <div class="dec-prog" title="Stop → Entry → Target"><div class="fill" style="width:${px>0?fromStop(px):0}%"></div><div class="mark" style="left:${fromStop(en.entry)}%"></div>${px>0?`<div class="now" style="left:${fromStop(px)}%"></div>`:''}</div>
-      <div class="dec-lv"><div><span>SL</span>${e(L.price(en.stop))}</div><div><span>ENTRY</span>${e(L.price(en.entry))}</div><div><span>TP (2R)</span>${e(L.price(en.target))}</div><div><span>RR</span>1:${(Math.abs(en.target-en.entry)/risk).toFixed(2)}</div></div>
-      <div class="dec-outcome ${o.code==='STOP_HIT'?'neg':o.code==='TARGET_HIT'?'pos':'muted'}">${e(oTxt)}</div>
-      ${execPanel({symbol:en.symbol,side:en.side,entry:en.entry,stop:en.stop,target:en.target},ex)}
+      <div class="dec-prog" title="Stop → Entry → ${fin(en.target2)?'TP1 → TP2':'Target'}"><div class="fill" style="width:${px>0?fromStop(px):0}%"></div><div class="mark" style="left:${fromStop(en.entry)}%"></div>${fin(en.target2)?`<div class="mark tp1" style="left:${fromStop(en.target)}%"></div>`:''}${px>0?`<div class="now" style="left:${fromStop(px)}%"></div>`:''}</div>
+      <div class="dec-lv"><div><span>SL</span>${e(L.price(en.stop))}</div><div><span>ENTRY</span>${e(L.price(en.entry))}</div>${fin(en.target2)?`<div><span>TP1 (2R)</span>${e(L.price(en.target))}</div><div><span>TP2 (3R)</span>${e(L.price(en.target2))}</div>`:`<div><span>TP (2R)</span>${e(L.price(en.target))}</div><div><span>RR</span>1:${(Math.abs(en.target-en.entry)/risk).toFixed(2)}</div>`}</div>
+      <div class="dec-outcome ${o.code==='STOP_HIT'?'neg':o.code==='TARGET_HIT'||o.code==='TP1_STOP'||o.code==='TP1_HORIZON'||o.tp1AtMs?'pos':'muted'}">${e(oTxt)}</div>
+      ${execPanel({symbol:en.symbol,side:en.side,entry:en.entry,stop:en.stop,target:en.target,target2:en.target2,tp1Frac:en.tp1Frac},ex)}
       <div class="dec-data"><div class="dec-cell"><div class="lbl">OPEN INTEREST</div>${oi}</div><div class="dec-cell"><div class="lbl">CVD (TAKER)</div>${cvd}</div><div class="dec-cell"><div class="lbl">ORDERBOOK</div>${ob}</div>
         <div class="dec-cell"><div class="lbl">INVALIDASI</div><div class="sub ${invWarn?'dec-warn':''}">${e(invShort(inv))}${invWarn?'<br>⚠ harga sudah melewati level invalidasi':''}</div></div></div>
       <div class="muted small" style="margin-top:8px">OI · CVD · orderbook hanya tampilan, tidak masuk skor (PRD §4.5).</div></div>`;
@@ -109,8 +141,8 @@
   function decisionScreen(c){
     const n=LG.active(c.ledger,c.now).length;
     return `<div class="section-head"><h2>Decision</h2><span class="muted small">${n} pair lolos hard gate engine · urut close terbaru lalu M6 · skor dikunci saat masuk</span></div>
-      ${execForm(c.ex)}<div id="dec-list" class="dec-list">${decisionList(c)}</div>
-      <div class="note" style="margin-top:12px">Decision = status <b>Layak dipertimbangkan</b> PRD (semua gate lolos, termasuk slot &amp; risiko portofolio simulasi). M6 adalah indeks 0–500, bukan peluang menang. Batas skor "layak" belum ditetapkan — menunggu riset Tahap 2.</div>`;
+      ${riskPanel(c)}${execForm(c.ex)}<div id="dec-list" class="dec-list">${decisionList(c)}</div>
+      <div class="note" style="margin-top:12px">Decision = status <b>Layak dipertimbangkan</b> PRD (semua gate lolos, termasuk slot &amp; risiko portofolio: maks 10 posisi, risiko 1%/trade, risiko terbuka ≤10%; bila lebih dari 10 sinyal lolos bersamaan, urutan menurut M6). M6 adalah indeks 0–500, bukan peluang menang. Batas skor "layak" belum ditetapkan — menunggu riset Tahap 2.</div>`;
   }
 
   // ---------- Layar 2: Semua Pair ----------
@@ -152,22 +184,22 @@
     const stat=(k,label,v)=>`<div class="stat" data-jstat="${k}"><div class="k">${e(label)}</div><div class="v">${v}</div></div>`;
     let h=`<div class="section-head"><h2>Jurnal Sinyal</h2><button class="btn" data-action="download-journal">Unduh CSV (${rows.length})</button></div>
       <div class="filters">${sel('pair','Pair',uniq('symbol').map(s=>[s,s]))}${sel('side','Arah',[['LONG','LONG'],['SHORT','SHORT']])}${sel('family','Keluarga',uniq('family').map(s=>[s,L.FAMILY[s]||s]))}
-        ${sel('outcome','Hasil',[['TARGET_HIT','Kena TP'],['STOP_HIT','Kena SL'],['HORIZON_EXIT','Keluar 24 jam'],['NO_DATA','Data tidak ada']])}
+        ${sel('outcome','Hasil',[['TARGET_HIT','Kena TP / TP2'],['TP1_STOP','TP1 lalu SL'],['TP1_HORIZON','TP1 lalu keluar 24 jam'],['STOP_HIT','Kena SL'],['HORIZON_EXIT','Keluar 24 jam'],['NO_DATA','Data tidak ada']])}
         <label>M6 min<input data-jf="m6min" inputmode="decimal" value="${e(f.m6min||'')}" placeholder="mis. 320"></label><label>M6 maks<input data-jf="m6max" inputmode="decimal" value="${e(f.m6max||'')}"></label></div>
-      <div class="cards">${stat('n','Sinyal selesai',sm.n)}${stat('tp','Kena TP',sm.TARGET_HIT)}${stat('sl','Kena SL',sm.STOP_HIT)}${stat('hz','Keluar 24 jam',sm.HORIZON_EXIT)}${stat('avg','Rata-rata R',fin(sm.avgR)?(sm.avgR>=0?'+':'')+sm.avgR.toFixed(3):'—')}</div>`;
+      <div class="cards">${stat('n','Sinyal selesai',sm.n)}${stat('tp','Kena TP / TP2',sm.TARGET_HIT)}${stat('tp1','TP1 lalu SL / 24 jam',sm.TP1_STOP+sm.TP1_HORIZON)}${stat('sl','Kena SL',sm.STOP_HIT)}${stat('hz','Keluar 24 jam',sm.HORIZON_EXIT)}${stat('avg','Rata-rata R',fin(sm.avgR)?(sm.avgR>=0?'+':'')+sm.avgR.toFixed(3):'—')}</div>`;
     if(!rows.length)return h+`<div class="empty" data-empty="jurnal">${all.length?'Belum ada sinyal selesai untuk filter ini.':'Belum ada sinyal Decision yang selesai. Setiap pair yang masuk Decision dicatat otomatis di sini setelah hasilnya (TP / SL / 24 jam) diketahui.'}</div>`;
     h+=`<div class="table-wrap"><table class="journal"><thead><tr><th>Keputusan</th><th>Pair</th><th>Arah</th><th>Keluarga</th><th class="num">M1+M2q</th><th class="num">M6</th><th>Rezim BTC</th>
-      <th class="num">Entry</th><th class="num">SL</th><th class="num">TP</th><th>Hasil</th><th class="num">Keluar</th><th class="num">R</th></tr></thead><tbody>`;
+      <th class="num">Entry</th><th class="num">SL</th><th class="num">TP1</th><th class="num">TP2</th><th>Hasil</th><th class="num">Keluar</th><th class="num">R</th></tr></thead><tbody>`;
     for(const r of rows.slice(0,300)){const o=r.outcome;
       h+=`<tr data-jrow="${e(r.key)}"><td class="small">${e(L.dateTime(r.decisionMs))}</td><td><b>${e(r.symbol)}</b>${r.rank?` <span class="muted small">#${r.rank}</span>`:''}</td><td>${side(r.side)}</td><td>${e(L.FAMILY[r.family]||r.family)}</td>
         <td class="num">${sc(r.scores.m1m2q)}</td><td class="num">${sc(r.scores.m6)}</td><td>${regimeChip(r.regime)||'—'}</td>
-        <td class="num mono">${e(L.price(r.entry))}</td><td class="num mono">${e(L.price(r.stop))}</td><td class="num mono">${e(L.price(r.target))}</td>
-        <td><span class="chip ${o.code==='TARGET_HIT'?'primary':o.code==='STOP_HIT'?'reject':'neutral'}">${e(LG.OUTCOME_TEXT[o.code]||o.code)}</span><div class="muted small">${e(L.time(o.atMs))}</div></td>
+        <td class="num mono">${e(L.price(r.entry))}</td><td class="num mono">${e(L.price(r.stop))}</td><td class="num mono">${e(L.price(r.target))}</td><td class="num mono">${fin(r.target2)?e(L.price(r.target2)):'—'}</td>
+        <td><span class="chip ${o.code==='TARGET_HIT'?'primary':o.code==='STOP_HIT'?'reject':'neutral'}">${e(LG.outcomeText(r))}</span><div class="muted small">${o.tp1AtMs?'TP1 '+e(L.time(o.tp1AtMs))+' · ':''}${e(L.time(o.atMs))}</div></td>
         <td class="num mono">${e(L.price(o.exit))}</td><td class="num ${fin(o.r)?(o.r>=0?'pos':'neg'):''}">${fin(o.r)?(o.r>=0?'+':'')+o.r.toFixed(2):'—'}</td></tr>`;}
     h+='</tbody></table></div>';
     if(rows.length>300)h+=`<div class="muted small">300 terbaru ditampilkan; seluruh ${rows.length} baris ada di unduhan CSV.</div>`;
-    return h+'<div class="note" style="margin-top:10px">Hasil menurut candle 4H Binance dengan harga yang dibekukan saat Decision (stop dievaluasi lebih dahulu, horizon 24 jam) — bukan fill order akunmu. Hanya sinyal yang benar-benar masuk Decision saat aplikasi berjalan yang dicatat.</div>';
+    return h+'<div class="note" style="margin-top:10px">Hasil menurut candle 4H Binance dengan harga yang dibekukan saat Decision (stop dievaluasi lebih dahulu, TP1 2R tutup 50% lalu TP2 3R, SL tetap, horizon 24 jam; R = gabungan kedua bagian) — bukan fill order akunmu. Hanya sinyal yang benar-benar masuk Decision saat aplikasi berjalan yang dicatat.</div>';
   }
 
-  root.Malomo.ui={health,universeLine,regimeChip,execForm,execSaveStatus,execPanel,decisionCard,decisionList,decisionScreen,pairsRows,pairsScreen,journalScreen};
+  root.Malomo.ui={health,universeLine,regimeChip,riskPanel,riskNumbers,execForm,execSaveStatus,execPanel,decisionCard,decisionList,decisionScreen,pairsRows,pairsScreen,journalScreen};
 })(globalThis);

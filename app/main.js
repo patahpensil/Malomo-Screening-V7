@@ -97,7 +97,9 @@
     if(app.universe.source==='live')store('snap',app.snap);
   }
   const snapSymbols=()=>app.snap?app.snap.list.map(x=>x.symbol):C.PAIRS.slice();
-  const carrySymbols=()=>LG.active(app.ledger,transport.serverNow()).map(e=>e.symbol);
+  // Pair sinyal yang slotnya masih berjalan ATAU hasilnya belum final (≤ 48 jam) tetap diunduh, supaya hasil jurnal
+  // tidak berubah menjadi NO_DATA hanya karena pair keluar dari 100 besar volume atau aplikasi lama tidak dibuka.
+  const carrySymbols=()=>{const now=transport.serverNow();return [...new Set([...LG.active(app.ledger,now),...LG.unresolved(app.ledger,now)].map(e=>e.symbol))];};
   const relevant=()=>new Set([...snapSymbols(),...C.PAIRS,...carrySymbols()]);   // pair yang menentukan keputusan close ini
 
   // Pair yang baru masuk 100 besar di tengah siklus: candle diunduh di latar; ikut keputusan mulai close berikutnya.
@@ -136,7 +138,7 @@
       LG.resolve(app.ledger,app.raw,now);store('ledger',app.ledger);
     }else app.error=err;
     app.loading=false;
-    live.sync(carrySymbols());live.pollOI();
+    live.sync(LG.active(app.ledger,transport.serverNow()).map(e=>e.symbol));live.pollOI();
     render();
   }
   // Candle 4H: unduhan penuh (1.500) sekali, siklus berikutnya cukup 10 candle terakhir lalu digabung (R34).

@@ -31,18 +31,38 @@
   }
 
   /* Outcome riset posisi (§6 butir 4, §8.1.8): stop/target hanya mencatat hasil dan TIDAK membebaskan slot.
-     Candle 4H yang sudah close di [entry, entry+24 jam). Stop dievaluasi lebih dahulu bila keduanya tersentuh. */
-  function outcome(pos,candles,now){
-    const end=pos.entryMs+R.MANDATE.holdMs,s=pos.side==='LONG'?1:-1,dist=Math.abs(pos.entry-pos.stop);
-    const win=candles.filter(x=>x.t>=pos.entryMs&&x.t<end&&x.t+H4<=now);
+     Candle 4H yang sudah close di [entry, entry+24 jam). Stop dievaluasi lebih dahulu bila tersentuh di candle yang sama.
+     R37 (mandat LIVE): bila pos.target2 ada → TP1 (target, tutup frac) lalu TP2 (target2, sisa); SL TETAP di tempat setelah TP1.
+       STOP_HIT  : SL sebelum TP1                     → −1R
+       TP1_STOP  : TP1 lalu SL                        → frac·rr − (1−frac)
+       TARGET_HIT: TP1 lalu TP2 (boleh di candle sama) → frac·rr + (1−frac)·rr2
+       TP1_HORIZON / HORIZON_EXIT: sisa ditutup pada close candle ke-6. */
+  function outcome(pos,candles,now,M=R.MANDATE){
+    const end=pos.entryMs+M.holdMs,s=pos.side==='LONG'?1:-1,dist=Math.abs(pos.entry-pos.stop);
+    const win=candles.filter(x=>x.t>=pos.entryMs&&x.t<end&&x.t+H4<=now).sort((a,b)=>a.t-b.t);
+    const rOf=px=>dist>0?s*(px-pos.entry)/dist:null;
+    const two=fin(pos.target2),f=two?(fin(pos.tp1Frac)?pos.tp1Frac:0.5):1;
+    let tp1At=null;
     for(const x of win){
-      const stopHit=s===1?x.low<=pos.stop:x.high>=pos.stop,targetHit=s===1?x.high>=pos.target:x.low<=pos.target;
-      if(stopHit)return {code:'STOP_HIT',atMs:x.t+H4,r:-1};
-      if(targetHit)return {code:'TARGET_HIT',atMs:x.t+H4,r:R.MANDATE.rr};
+      const stopHit=s===1?x.low<=pos.stop:x.high>=pos.stop;
+      const hit=px=>s===1?x.high>=px:x.low<=px;
+      if(tp1At===null){
+        if(stopHit)return {code:'STOP_HIT',atMs:x.t+H4,r:-1};
+        if(hit(pos.target)){
+          if(!two)return {code:'TARGET_HIT',atMs:x.t+H4,r:rOf(pos.target)};
+          tp1At=x.t+H4;
+          if(hit(pos.target2))return {code:'TARGET_HIT',atMs:x.t+H4,tp1AtMs:tp1At,r:f*rOf(pos.target)+(1-f)*rOf(pos.target2)};
+        }
+      }else{
+        if(stopHit)return {code:'TP1_STOP',atMs:x.t+H4,tp1AtMs:tp1At,r:f*rOf(pos.target)+(1-f)*rOf(pos.stop)};
+        if(hit(pos.target2))return {code:'TARGET_HIT',atMs:x.t+H4,tp1AtMs:tp1At,r:f*rOf(pos.target)+(1-f)*rOf(pos.target2)};
+      }
     }
-    const need=R.MANDATE.holdMs/H4;
-    if(win.length>=need){const last=win[need-1];return {code:'HORIZON_EXIT',atMs:last.t+H4,r:dist>0?s*(last.close-pos.entry)/dist:null};}
-    return {code:'OPEN',atMs:null,r:null,candlesSeen:win.length,of:need};
+    const need=M.holdMs/H4;
+    if(win.length>=need){const last=win[need-1],rc=rOf(last.close);
+      if(tp1At!==null)return {code:'TP1_HORIZON',atMs:last.t+H4,tp1AtMs:tp1At,r:f*rOf(pos.target)+(1-f)*rc,exit:last.close};
+      return {code:'HORIZON_EXIT',atMs:last.t+H4,r:rc};}
+    return {code:'OPEN',atMs:null,r:null,candlesSeen:win.length,of:need,tp1AtMs:tp1At};
   }
 
   /* pairs   = basket M3 (PRD §5: enam pair inti, TIDAK berubah).
@@ -50,7 +70,8 @@
      gate    = {fromMs, allowed} (R34 hard gate): untuk close T ≥ fromMs hanya pair dalam `allowed` yang diteruskan ke
                decide; close sebelumnya memakai semua pair yang diunduh (riwayat replay = perkiraan, PRD §17).
      Rumus skor tidak berubah: decide menerima peta analisis yang sama bentuknya, hanya himpunan pair yang disaring. */
-  function buildState({rawBySymbol,now,frozen,failed=[],pairs=PAIRS,symbols=null,gate=null,frozenMeta=null}){
+  function buildState({rawBySymbol,now,frozen,failed=[],pairs=PAIRS,symbols=null,gate=null,frozenMeta=null,mandate=R.LIVE}){
+    const MD=mandate;   // R37: aplikasi memakai mandat LIVE; mandat riset hanya untuk tes/verifikasi
     const T=lastClosedT(now),analyses=new Map(),rowsAt=new Map();
     const syms=[...new Set([...(symbols||pairs),...pairs])];
     for(const s of syms){
@@ -76,7 +97,7 @@
       if(!gated.has('g')){const m=new Map();for(const [s,a] of analyses)if(al.has(s))m.set(s,a);gated.set('g',m);}return gated.get('g');};
     for(const Tk of order){
       const entryOpen=s=>{const r=rowsAt.get(s)&&rowsAt.get(s).get(Tk);return r&&fin(r.open)&&r.open>0?r.open:null;};
-      const res=P.decide(Tk,analysesAt(Tk),{provider,portfolio,entryOpen,log,pairs,closes});
+      const res=P.decide(Tk,analysesAt(Tk),{provider,portfolio,entryOpen,log,pairs,closes,mandate:MD});
       portfolio=res.portfolio;
       for(const r of res.records)history.push(r);
       if(Tk===T)current=res;
@@ -100,18 +121,18 @@
     const positions=history.filter(r=>r.status==='ENTRY_CONSIDER').map(r=>{
       const entryMs=Date.parse(r.entry_reference_time_utc);
       const pos={id:r.symbol+'|'+r.side+'|'+r.signal_family+'|'+r.decision_available_utc,symbol:r.symbol,side:r.side,family:r.signal_family,
-        entryMs,slotReleaseMs:entryMs+R.MANDATE.holdMs,entry:r.entry_reference_open,stop:r.stop_price,target:r.target_price,qty:r.qty,
+        entryMs,slotReleaseMs:entryMs+MD.holdMs,entry:r.entry_reference_open,stop:r.stop_price,target:r.target_price,target2:r.target2_price??null,tp1Frac:r.tp1_fraction??1,qty:r.qty,
         riskPct:r.risk_pct,grossPct:r.gross_pct,invalidation:r.invalidation,m6:r.scores.m6_confluense_500,record:r};
-      pos.outcome=outcome(pos,analyses.get(r.symbol).c,now);
+      pos.outcome=outcome(pos,analyses.get(r.symbol).c,now,MD);
       pos.active=pos.slotReleaseMs>now;
       return pos;
     });
     const active=positions.filter(p=>p.active);
     const book={active,closed:positions.filter(p=>!p.active).reverse(),
       openRiskPct:active.reduce((s,p)=>s+p.riskPct,0),grossPct:active.reduce((s,p)=>s+p.grossPct,0),
-      maxPositions:R.MANDATE.maxPositions,riskOpenMaxPct:100*R.MANDATE.riskOpen,grossMaxPct:100*R.MANDATE.gross,
+      maxPositions:MD.maxPositions,riskOpenMaxPct:100*MD.riskOpen,grossMaxPct:fin(MD.gross)?100*MD.gross:null,mandate:MD.version,
       rejections:history.filter(r=>r.status==='REJECTED_RISK').reverse(),rejectionCounts:{},
-      replayFromMs:order.length?firstCandleMs(analyses):null,equity:R.MANDATE.equity};
+      replayFromMs:order.length?firstCandleMs(analyses):null,equity:MD.equity};
     for(const r of book.rejections)for(const x of r.reasons)book.rejectionCounts[x]=(book.rejectionCounts[x]||0)+1;
     // Pair yang ditampilkan: universe hari ini (atau semua bila tanpa gate) + pair posisi berjalan.
     const shown=new Set(gate?[...gate.allowed].filter(s=>analyses.has(s)):syms);for(const p of active)shown.add(p.symbol);

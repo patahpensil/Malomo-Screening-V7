@@ -27,17 +27,23 @@
     return {score:correlation60+tail40,status:'SCORED',reasons:[],components:{correlation60,tail40,meanAbsCorr:A,J,pairsCorr:corrs.length}};
   }
 
-  const MANDATE=Object.freeze({version:'RESEARCH_1_3_1X_V1',equity:100,riskTrade:0.01,riskOpen:0.03,gross:1.0,maxPositions:3,stopAtr:1.5,rr:2,holdMs:24*3600*1000});
+  const MANDATE=Object.freeze({version:'RESEARCH_1_3_1X_V1',equity:100,riskTrade:0.01,riskOpen:0.03,gross:1.0,maxPositions:3,stopAtr:1.5,rr:2,rr2:null,tp1Frac:1,capPerPosition:true,holdMs:24*3600*1000});
+  /* Mandat LIVE (PRD v1.0.15 R37, keputusan pengguna 2026-10-12): maks 10 posisi, risiko 1%/trade, risiko terbuka ≤10%,
+     batas notional (gross) DIHAPUS (total dan per posisi), TP1 = 2R (tutup 50%), TP2 = 3R (sisa 50%), SL tetap, horizon 24 jam.
+     Rumus M4 (40D+35P+25N) dan seluruh bobot/skor M1–M6 TIDAK berubah — hanya parameter kapasitas & exit.
+     MANDATE riset di atas tetap dipakai oleh tes paritas/verifikasi PRD riset. */
+  const LIVE=Object.freeze({version:'LIVE_10P_1PCT_TP2R3R_V1',equity:100,riskTrade:0.01,riskOpen:0.10,gross:Infinity,maxPositions:10,stopAtr:1.5,rr:2,rr2:3,tp1Frac:0.5,capPerPosition:false,holdMs:24*3600*1000});
   const EPS=1e-12;
   // Portofolio simulasi (v1.0.5): slot terisi 24 jam tetap; stop/target hanya outcome, tidak membebaskan slot.
   function release(portfolio,tMs){return {positions:(portfolio.positions||[]).filter(p=>!(p.slotReleaseMs<=tMs))};}
   function plan(side,entry,atrEntry,M=MANDATE){
-    const s=side==='LONG'?1:-1,dist=M.stopAtr*atrEntry,stop=entry-s*dist,target=entry+s*M.rr*dist;
-    const ok=fin(entry)&&entry>0&&fin(atrEntry)&&atrEntry>0&&stop>0;
-    if(!ok)return {ok:false,entry,stop,target};
-    const qty=Math.min(M.riskTrade*M.equity/Math.abs(entry-stop),M.equity/entry);
+    const s=side==='LONG'?1:-1,dist=M.stopAtr*atrEntry,stop=entry-s*dist,target=entry+s*M.rr*dist,target2=fin(M.rr2)?entry+s*M.rr2*dist:null;
+    const ok=fin(entry)&&entry>0&&fin(atrEntry)&&atrEntry>0&&stop>0&&(target2===null||target2>0);
+    if(!ok)return {ok:false,entry,stop,target,target2};
+    const byRisk=M.riskTrade*M.equity/Math.abs(entry-stop);
+    const qty=M.capPerPosition===false?byRisk:Math.min(byRisk,M.equity/entry);
     const risk=qty*Math.abs(entry-stop),notional=qty*entry;
-    return {ok:true,entry,stop,target,qty,risk,notional,riskPct:100*risk/M.equity,grossPct:100*notional/M.equity,stopDistance:dist};
+    return {ok:true,entry,stop,target,target2,qty,risk,notional,riskPct:100*risk/M.equity,grossPct:100*notional/M.equity,stopDistance:dist};
   }
   // M4 = 40D + 35P + 25N, dengan reason terpisah. Untuk kandidat layak entry ketiganya wajib 1 (M4=100).
   function check(symbol,pl,portfolio,M=MANDATE){
@@ -56,5 +62,5 @@
   }
 
   const M5=Object.freeze({score:55,snapshot:'M5_AUDIT_2024_CLOSED_BAR_9BPS_V1',scope:'BREAKOUT_2024_NO_DIRECTION_GATE',indicators:{C:1,P:1,K:0,R:0}});
-  return {m3,MANDATE,release,plan,check,M5};
+  return {m3,MANDATE,LIVE,release,plan,check,M5};
 });

@@ -80,7 +80,7 @@ test('validateSettings: modal wajib > 0, risiko 0,5–1%, biaya 0–50 bps, koma
   for(const r of ['0.4','1.1','0','-1','x'])assert.equal(X.validateSettings({capital:'1',riskPct:r}).errors.riskPct,'INVALID',r);
   for(const r of ['0.5','1'])assert(X.validateSettings({capital:'1',riskPct:r}).ok,r);
   for(const c of ['-1','51','x'])assert.equal(X.validateSettings({capital:'1',costBps:c}).errors.costBps,'INVALID',c);
-  const d=X.validateSettings({capital:'5'});assert.equal(d.riskPct,0.5);assert.equal(d.costBps,18);
+  const d=X.validateSettings({capital:'5'});assert.equal(d.riskPct,1);assert.equal(d.costBps,18);   // R37: default risiko 1%
 });
 
 // ---------- rencana ----------
@@ -88,7 +88,7 @@ const DOGE=rulesFor('DOGEUSDT','0.000010','1',1,5);
 const dogeInput={symbol:'DOGEUSDT',side:'LONG',entry:0.162347,stop:0.162347-0.00618,target:0.162347+2*0.00618};
 test('Contoh dihitung manual (DOGE LONG, modal 1000, risiko 0,5%, biaya 18 bps): angka tepat',()=>{
   const p=X.plan(dogeInput,SET,DOGE);
-  assert.equal(p.status,'READY');assert.deepEqual(p.priceStr,{entry:'0.16234',stop:'0.15616',target:'0.17470'});
+  assert.equal(p.status,'READY');assert.deepEqual(p.priceStr,{entry:'0.16234',stop:'0.15616',target:'0.17470',target2:null});
   // qty = floor(5 / (0.00618 + 0.0018×0.16234)) = floor(772.53…) = 772
   assert.equal(p.qtyStr,'772');assert(Math.abs(p.lossAtStop-772*(0.00618+0.0018*0.16234))<1e-9);assert(p.lossAtStop<=5);
   // leverage aman = floor(1/(2×0.00618/0.16234 + 0.01)) = floor(11.6…) = 11
@@ -97,9 +97,9 @@ test('Contoh dihitung manual (DOGE LONG, modal 1000, risiko 0,5%, biaya 18 bps):
 test('Arah pembulatan aman: LONG semua ke bawah, SHORT semua ke atas (entry tidak lebih mahal, SL menjauh, TP mendekat)',()=>{
   const g='0.01';const R=rulesFor('ETHUSDT',g,'0.001',0.001,20);
   const L=X.plan({symbol:'ETHUSDT',side:'LONG',entry:2512.3456,stop:2450.1234,target:2636.789},SET,R);
-  assert.deepEqual(L.priceStr,{entry:'2512.34',stop:'2450.12',target:'2636.78'});
+  assert.deepEqual(L.priceStr,{entry:'2512.34',stop:'2450.12',target:'2636.78',target2:null});
   const Sh=X.plan({symbol:'ETHUSDT',side:'SHORT',entry:2512.3456,stop:2574.5678,target:2387.9012},SET,R);
-  assert.deepEqual(Sh.priceStr,{entry:'2512.35',stop:'2574.57',target:'2387.91'});
+  assert.deepEqual(Sh.priceStr,{entry:'2512.35',stop:'2574.57',target:'2387.91',target2:null});
 });
 test('Status: modal kosong → NEED_SETTINGS; input salah → INVALID_SETTINGS; aturan tidak ada → UNROUNDED tanpa string salin',()=>{
   assert.equal(X.plan(dogeInput,{capital:''},DOGE).status,'NEED_SETTINGS');
@@ -169,6 +169,51 @@ test('Properti 5.000 kasus acak: risiko nyata ≤ batas, kelipatan tick/step tep
     if(p.status==='READY')ready++;
   }
   assert(ready>1000,'kasus READY terlalu sedikit: '+ready);
+});
+
+
+// ---------- R37 TP1 / TP2 ----------
+test('R37 TP1/TP2: DOGE LONG modal 1000 risiko 1% — harga TP2 dibulatkan aman, qty dibagi 50/50 kelipatan step, rugi ≤ anggaran',()=>{
+  const inp=Object.assign({},dogeInput,{target2:0.162347+3*0.00618,tp1Frac:0.5});
+  const p=X.plan(inp,{capital:'1000',riskPct:'1',costBps:'18'},DOGE);
+  assert.equal(p.status,'READY');assert.equal(p.split,true);
+  assert.deepEqual(p.priceStr,{entry:'0.16234',stop:'0.15616',target:'0.17470',target2:'0.18088'});   // TP2 LONG dibulatkan turun (mendekat ke entry)
+  // qty = floor(10 / (0.00618 + 0.0018×0.16234)) = floor(1545.07…) = 1545 → TP1 floor(772.5)=772, TP2 773
+  assert.equal(p.qtyStr,'1545');assert.equal(p.qty1Str,'772');assert.equal(p.qty2Str,'773');assert.equal(p.qty1+p.qty2,p.qty);
+  assert(p.lossAtStop<=10+1e-9);assert(Math.abs(p.rr2-3*0.00618/0.00618)<0.01);
+  assert(p.gainAtTarget2>p.gainAtTarget&&p.gainAtTarget>0);
+  const sh=X.plan({symbol:'ETHUSDT',side:'SHORT',entry:2512.3456,stop:2574.5678,target:2387.9012,target2:2325.6789},SET,rulesFor('ETHUSDT','0.01','0.001',0.001,20));
+  assert.equal(sh.priceStr.target2,'2325.68');   // SHORT dibulatkan naik (mendekat ke entry)
+});
+test('R37 TP1/TP2: bagian qty di bawah minimum pair → NOT_EXECUTABLE (SPLIT_BELOW_MIN); TP2 di sisi salah → PLAN_GEOMETRY',()=>{
+  const btc={symbol:'BTCUSDT',side:'LONG',entry:60000,stop:58800,target:62400,target2:63600};
+  const r=rulesFor('BTCUSDT','0.10','0.001',0.001,3000);
+  const mid=X.plan(btc,{capital:'12000',riskPct:'1'},r);   // qty 0.091 (notional 5460 ≥ 3000) → separuh 0.045 (2700) < min notional 3000
+  assert(mid.reasons.includes('SPLIT_BELOW_MIN'),mid.reasons.join());assert.equal(mid.status,'NOT_EXECUTABLE');
+  const ok=X.plan(btc,{capital:'40000',riskPct:'1'},r);assert.equal(ok.status,'READY',ok.reasons.join());
+  const bad=X.plan(Object.assign({},btc,{target2:61000}),{capital:'40000',riskPct:'1'},r);
+  assert.equal(bad.status,'NOT_EXECUTABLE');assert(bad.reasons.includes('PLAN_GEOMETRY'));
+});
+test('R37 properti acak 3000 rencana TP1/TP2: semua harga kelipatan tick, qty1+qty2 = qty (kelipatan step), rugi ≤ anggaran',()=>{
+  let seed=7;const rnd=()=>{seed=(seed*1103515245+12345)%2147483648;return seed/2147483648;};
+  const TICKS=['0.1','0.01','0.0001','0.000001'],STEPS=['1','0.1','0.001'];let ready=0;
+  const units=(str,g)=>{const d=(g.split('.')[1]||'').length;return Math.round(Number(str)*10**d)/Math.round(Number(g)*10**d);};
+  for(let k=0;k<3000;k++){
+    const tick=TICKS[Math.floor(rnd()*TICKS.length)],step=STEPS[Math.floor(rnd()*STEPS.length)];
+    const price=Number(tick)*Math.round(10**(2+rnd()*5)),side=rnd()<0.5?'LONG':'SHORT',s=side==='LONG'?1:-1,dist=1.5*(0.003+rnd()*0.05)*price;
+    const inp={symbol:'SOLUSDT',side,entry:price,stop:price-s*dist,target:price+s*2*dist,target2:price+s*3*dist,tp1Frac:0.5};
+    if(!(inp.stop>0)||!(inp.target2>0))continue;
+    const set={capital:String(Math.round(10**(2+rnd()*5))),riskPct:'1',costBps:String(Math.round(rnd()*30))};
+    const p=X.plan(inp,set,rulesFor('SOLUSDT',tick,step,Number(step),0));
+    if(p.status!=='READY')continue;ready++;
+    for(const f of ['entry','stop','target','target2']){const u=units(p.priceStr[f],tick);assert(Math.abs(u-Math.round(u))<1e-6,f+' '+p.priceStr[f]);}
+    const q=units(p.qtyStr,step),q1=units(p.qty1Str,step),q2=units(p.qty2Str,step);
+    assert(Math.abs(q1+q2-q)<1e-6&&Math.abs(q1-Math.round(q1))<1e-6&&Math.abs(q2-Math.round(q2))<1e-6,'qty split');
+    assert(p.lossAtStop<=Number(set.capital)*0.01*(1+1e-9)+1e-12);
+    const E=Number(p.priceStr.entry),T1=Number(p.priceStr.target),T2=Number(p.priceStr.target2);
+    assert(s===1?T2>T1&&T1>E:T2<T1&&T1<E,'urutan TP');
+  }
+  assert(ready>500,'READY terlalu sedikit '+ready);
 });
 
 // ---------- record PRD tidak berubah ----------

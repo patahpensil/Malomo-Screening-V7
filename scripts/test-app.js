@@ -14,7 +14,7 @@ const RAW=S.generate({n:1600});
 const candlesOf=(raw,pred=()=>true)=>{const o={};for(const s in raw)o[s]=raw[s].filter(pred).map(Cy.toCandle);return o;};
 const ALL=candlesOf(RAW);
 const LAST_OPEN=RAW.BTCUSDT[RAW.BTCUSDT.length-1][0];
-const build=(now,extra={})=>Cy.buildState(Object.assign({rawBySymbol:candlesOf(RAW,k=>k[0]<=now),now,frozen:FROZEN},extra));
+const build=(now,extra={})=>Cy.buildState(Object.assign({rawBySymbol:candlesOf(RAW,k=>k[0]<=now),now,frozen:FROZEN,mandate:R.MANDATE},extra));
 const FULL=build(LAST_OPEN+10000);
 const recId=r=>r.symbol+'|'+r.side+'|'+r.signal_family+'|'+r.decision_available_utc;
 // Siklus contoh dengan ENTRY_CONSIDER dan REJECTED_RISK pada T yang sama.
@@ -88,7 +88,7 @@ test('Idempoten: siklus yang sama dibangun dua kali menghasilkan record identik 
 });
 test('Dua fase §1: open(t+1) belum ada → CLOSE_CANDIDATE, harga & M6 null; open tersedia → ENTRY_REVIEW',()=>{
   const now=busyT+10000,raw=candlesOf(RAW,k=>k[0]<=now&&k[0]!==busyT);   // candle berjalan belum muncul
-  const st=Cy.buildState({rawBySymbol:raw,now,frozen:FROZEN});
+  const st=Cy.buildState({mandate:R.MANDATE,rawBySymbol:raw,now,frozen:FROZEN});
   assert.equal(st.T,busyT);assert.equal(st.cycle.summary.phase,'CLOSE_CANDIDATE');
   const cc=st.cycle.records.filter(r=>r.status==='CLOSE_CANDIDATE');assert(cc.length>=2);
   for(const r of cc){assert.equal(r.entry_reference_open,null);assert.equal(r.qty,null);assert.equal(r.gross_pct,null);assert.equal(r.scores.m6_confluense_500,null);assert.deepEqual(r.reasons,[]);}
@@ -123,10 +123,65 @@ test('Outcome riset: stop dievaluasi lebih dulu; target; horizon 24 jam; berjala
   const sh={side:'SHORT',entryMs:t0,entry:100,stop:103,target:94};
   assert.equal(Cy.outcome(sh,[c(0,100,104,93,99)],t0+H4).code,'STOP_HIT');assert.equal(Cy.outcome(sh,[c(0,100,101,94,95)],t0+H4).code,'TARGET_HIT');
 });
+
+// ---------- R37 mandat LIVE (aplikasi): 10 posisi, 1%/trade, risiko terbuka ≤10%, tanpa batas notional, TP1 2R / TP2 3R ----------
+const LIVE=Cy.buildState({rawBySymbol:ALL,now:LAST_OPEN+10000,frozen:FROZEN});   // default aplikasi = R.LIVE
+test('R37 default aplikasi = mandat LIVE; mandat riset tetap tersedia dan tidak berubah',()=>{
+  assert.equal(R.LIVE.maxPositions,10);assert.equal(R.LIVE.riskTrade,0.01);assert.equal(R.LIVE.riskOpen,0.10);assert.equal(R.LIVE.gross,Infinity);
+  assert.equal(R.LIVE.rr,2);assert.equal(R.LIVE.rr2,3);assert.equal(R.LIVE.tp1Frac,0.5);assert.equal(R.LIVE.holdMs,24*3600e3);
+  assert.equal(R.MANDATE.version,'RESEARCH_1_3_1X_V1');assert.equal(R.MANDATE.maxPositions,3);assert.equal(R.MANDATE.riskOpen,0.03);assert.equal(R.MANDATE.gross,1);
+  for(const r of LIVE.history)assert.equal(r.risk_mandate_version,R.LIVE.version);
+  assert.equal(LIVE.book.maxPositions,10);assert.equal(LIVE.book.riskOpenMaxPct,10);assert.equal(LIVE.book.grossMaxPct,null);
+});
+test('R37 PEMBOBOTAN TIDAK BERUBAH: record & skor M1/M2/M3/M5 (dan M6 untuk ENTRY_CONSIDER) identik dengan mandat riset',()=>{
+  const res=new Map(FULL.history.map(r=>[recId(r),r]));
+  assert.equal(LIVE.history.length,FULL.history.length);let both=0;
+  for(const r of LIVE.history){const q=res.get(recId(r));assert(q,'record hilang '+recId(r));
+    for(const k of ['m1_100','m2_signal_quality_80','m2_integrity_20','m2_100','m3_100','m5_100','m1_plus_m2q_0_180_display_only'])assert.equal(r.scores[k],q.scores[k],k+' '+recId(r));
+    assert.equal(r.rank_provisional,q.rank_provisional);
+    if(r.status==='ENTRY_CONSIDER'&&q.status==='ENTRY_CONSIDER'){assert.equal(r.scores.m6_confluense_500,q.scores.m6_confluense_500);both++;}
+    if(r.status==='ENTRY_CONSIDER')assert(Math.abs(r.scores.m6_confluense_500-(r.scores.m1_100+r.scores.m2_100+r.scores.m3_100+100+r.scores.m5_100))<1e-9);}
+  assert(both>0);
+  // Mandat LIVE hanya menambah sinyal yang lolos kapasitas, tidak mengurangi.
+  const nL=LIVE.history.filter(r=>r.status==='ENTRY_CONSIDER').length,nR=FULL.history.filter(r=>r.status==='ENTRY_CONSIDER').length;assert(nL>=nR,nL+' < '+nR);
+});
+test('R37 portofolio LIVE: ≤10 posisi, risiko terbuka ≤10%, risiko 1%/trade, tanpa GROSS_CAP, 1 posisi per pair, TP2 = 3R, TP1 = 2R',()=>{
+  const ec=LIVE.history.filter(r=>r.status==='ENTRY_CONSIDER');assert(ec.length>0);
+  const pos=ec.map(r=>({s:r.symbol,t:Date.parse(r.entry_reference_time_utc),risk:r.risk_pct}));
+  for(const p of pos){const act=pos.filter(q=>q.t<=p.t&&q.t+24*3600e3>p.t);
+    assert(act.length<=10);assert(act.reduce((s,q)=>s+q.risk,0)<=10+1e-9);assert.equal(new Set(act.map(q=>q.s)).size,act.length);}
+  for(const r of ec){const d=Math.abs(r.entry_reference_open-r.stop_price);
+    assert(Math.abs(r.risk_pct-1)<1e-9);assert.equal(r.tp1_fraction,0.5);assert.equal(r.rr_target2,3);
+    assert(Math.abs(Math.abs(r.target_price-r.entry_reference_open)-2*d)<1e-9*Math.max(1,d));
+    assert(Math.abs(Math.abs(r.target2_price-r.entry_reference_open)-3*d)<1e-9*Math.max(1,d));
+    assert(Math.abs(r.qty*d-1)<1e-9,'qty = 1% ekuitas / jarak stop (tanpa batas notional)');}
+  for(const r of LIVE.history)assert(!r.reasons.includes('GROSS_CAP'));
+});
+test('R37 setara dengan pipeline.replay mandat LIVE untuk semua T sebelum close terakhir',()=>{
+  const now=LAST_OPEN+10000,closed={};for(const s in RAW)closed[s]=RAW[s].filter(k=>k[0]+H4<=now).map(Cy.toCandle);
+  const rep=P.replay(closed,{frozen:FROZEN,startMs:0,endMs:LIVE.T-H4,mandate:R.LIVE});
+  const a=LIVE.history.filter(r=>Date.parse(r.decision_available_utc)<LIVE.T).map(r=>recId(r)+'|'+r.status+'|'+r.scores.m6_confluense_500+'|'+r.reasons.join(','));
+  assert.deepEqual(a,rep.records.map(r=>recId(r)+'|'+r.status+'|'+r.scores.m6_confluense_500+'|'+r.reasons.join(',')));
+});
+test('R37 outcome TP1/TP2 (SL tetap): SL dulu; TP1 lalu SL = +0,5R; TP1+TP2 = +2,5R (candle sama boleh); TP1 lalu 24 jam; SHORT simetris',()=>{
+  const t0=Date.UTC(2026,0,1),c=(i,o,h,l,cl)=>({t:t0+i*H4,open:o,high:h,low:l,close:cl}),M=R.LIVE;
+  const pos={side:'LONG',entryMs:t0,entry:100,stop:97,target:106,target2:109,tp1Frac:0.5};
+  assert.deepEqual(Cy.outcome(pos,[c(0,100,107,96,101)],t0+H4,M),{code:'STOP_HIT',atMs:t0+H4,r:-1});        // SL & TP1 di candle sama → SL
+  const a=Cy.outcome(pos,[c(0,100,106.5,99,106),c(1,106,107,96,97)],t0+2*H4,M);assert.equal(a.code,'TP1_STOP');assert(Math.abs(a.r-0.5)<1e-12);assert.equal(a.tp1AtMs,t0+H4);
+  const b=Cy.outcome(pos,[c(0,100,110,99,108)],t0+H4,M);assert.equal(b.code,'TARGET_HIT');assert(Math.abs(b.r-2.5)<1e-12);
+  const d=Cy.outcome(pos,[c(0,100,107,99,106),c(1,106,108,97.5,107)],t0+2*H4,M);assert.equal(d.code,'OPEN');assert.equal(d.tp1AtMs,t0+H4);
+  const six=[c(0,100,106,99,105),...[1,2,3,4,5].map(i=>c(i,105,107,98,i===5?103:105))];
+  const h=Cy.outcome(pos,six,t0+6*H4,M);assert.equal(h.code,'TP1_HORIZON');assert(Math.abs(h.r-(0.5*2+0.5*1))<1e-12);
+  const sh={side:'SHORT',entryMs:t0,entry:100,stop:103,target:94,target2:91,tp1Frac:0.5};
+  assert.equal(Cy.outcome(sh,[c(0,100,101,93,94),c(1,94,103.5,92,103)],t0+2*H4,M).code,'TP1_STOP');
+  assert(Math.abs(Cy.outcome(sh,[c(0,100,101,90,91)],t0+H4,M).r-2.5)<1e-12);
+  // Posisi tanpa target2 (riset/entri lama) tetap aturan TP tunggal.
+  assert.deepEqual(Cy.outcome({side:'LONG',entryMs:t0,entry:100,stop:97,target:106},[c(0,100,106,99,105)],t0+H4,M),{code:'TARGET_HIT',atMs:t0+H4,r:2});
+});
 test('FETCH_FAILED §1: pair gagal & data belum mencakup close terakhir → DATA_INCOMPLETE sementara, reason di depan, M6 null',()=>{
   const now=busyT+10000,raw=candlesOf(RAW,k=>k[0]<=now);
   raw.DOGEUSDT=raw.DOGEUSDT.filter(x=>x.t<busyT-H4);                     // cache lama tanpa candle terakhir
-  const st=Cy.buildState({rawBySymbol:raw,now,frozen:FROZEN,failed:['DOGEUSDT']});
+  const st=Cy.buildState({mandate:R.MANDATE,rawBySymbol:raw,now,frozen:FROZEN,failed:['DOGEUSDT']});
   assert.equal(st.cycle.summary.data_status,'DATA_INCOMPLETE');assert.deepEqual(st.cycle.summary.fetch_failed,['DOGEUSDT']);
   assert(st.cycle.records.length>0);
   for(const r of st.cycle.records){assert.notEqual(r.status,'ENTRY_CONSIDER');assert.equal(r.scores.m6_confluense_500,null);
@@ -136,13 +191,13 @@ test('FETCH_FAILED §1: pair gagal & data belum mencakup close terakhir → DATA
   const before=new Map(build(now).history.filter(r=>Date.parse(r.decision_available_utc)<busyT-H4).map(r=>[recId(r),r.status]));
   for(const r of st.history)if(before.has(recId(r)))assert.equal(r.status,before.get(recId(r)));
   // Gagal ulang tetapi data sudah mencakup close terakhir → tidak ditandai.
-  const ok=Cy.buildState({rawBySymbol:candlesOf(RAW,k=>k[0]<=now),now,frozen:FROZEN,failed:['DOGEUSDT']});
+  const ok=Cy.buildState({mandate:R.MANDATE,rawBySymbol:candlesOf(RAW,k=>k[0]<=now),now,frozen:FROZEN,failed:['DOGEUSDT']});
   assert.equal(ok.cycle.summary.data_status,'OK');assert.equal(ok.health.find(h=>h.symbol==='DOGEUSDT').fetch,'RETRYING_CACHED');
 });
 test('CONFIRMED_GAP §1: candle hilang tidak diinterpolasi; jendela sesudah gap belum pulih',()=>{
   const now=LAST_OPEN+10000,raw=candlesOf(RAW,k=>k[0]<=now),gapT=raw.SOLUSDT[raw.SOLUSDT.length-50].t;
   raw.SOLUSDT=raw.SOLUSDT.filter(x=>x.t!==gapT);
-  const st=Cy.buildState({rawBySymbol:raw,now,frozen:FROZEN});
+  const st=Cy.buildState({mandate:R.MANDATE,rawBySymbol:raw,now,frozen:FROZEN});
   const h=st.health.find(x=>x.symbol==='SOLUSDT');assert.equal(h.gaps,1);assert(h.recovery.m3>0,'M3 harus belum pulih');
   assert.equal(st.context.m3.status,'INCOMPLETE');assert.equal(st.cycle.summary.m3_status,'INCOMPLETE');
   assert(!st.history.some(r=>Date.parse(r.decision_available_utc)>gapT&&r.status==='ENTRY_CONSIDER'),'tidak boleh ada entry dengan M3 melintasi gap');
@@ -173,7 +228,7 @@ test('Kalibrasi live = array beku per keluarga (258/189/44), tanpa fitting ulang
   for(const r of FULL.history.filter(r=>r.calibration_policy))assert.equal(r.calibration_policy,'FROZEN_COMPLETE_TRAIN_ECDF');
 });
 test('Kinerja: membangun siklus 6 pair × 1.500 candle di bawah 3 detik',()=>{
-  const now=LAST_OPEN+10000,raw=candlesOf(RAW,k=>k[0]<=now&&k[0]>now-1500*H4),t=Date.now();Cy.buildState({rawBySymbol:raw,now,frozen:FROZEN});
+  const now=LAST_OPEN+10000,raw=candlesOf(RAW,k=>k[0]<=now&&k[0]>now-1500*H4),t=Date.now();Cy.buildState({mandate:R.MANDATE,rawBySymbol:raw,now,frozen:FROZEN});
   assert(Date.now()-t<3000,'terlalu lambat: '+(Date.now()-t)+' ms');
 });
 
