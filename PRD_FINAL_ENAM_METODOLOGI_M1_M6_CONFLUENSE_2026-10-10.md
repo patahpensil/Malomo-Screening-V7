@@ -1,6 +1,6 @@
 # PRD FINAL — ENAM METODOLOGI TRADING BERBOBOT & M6 CONFLUENSE
 
-**Versi:** 1.0.16-FINAL-DESIGN (revisi konsistensi dokumen atas 1.0.0; lihat Riwayat revisi)  
+**Versi:** 1.0.17-FINAL-DESIGN (revisi konsistensi dokumen atas 1.0.0; lihat Riwayat revisi)  
 **Tanggal keputusan:** 10 Oktober 2026  
 **Bahasa spesifikasi:** Indonesia; nama field dan status Inggris untuk kontrak antar-agen.  
 **Ruang lingkup:** spesifikasi metodologi penelitian dan protokol keluaran agen; **bukan permintaan membuat aplikasi, mengirim order, commit, push, atau deploy**.  
@@ -30,6 +30,7 @@
 | 1.0.14 | 12 Okt 2026 | Koreksi pengguna atas §18: (R36) Jurnal hanya mencatat sinyal yang **benar-benar masuk Decision** pada close berjalan saat aplikasi aktif — sinyal masa lalu dari replay tidak dicatat dan entri replay versi 1.0.13 dibuang saat dimuat; pengaturan modal/risiko/biaya hanya berlaku setelah tombol **Simpan** ditekan, dengan status tersimpan/belum disimpan yang selalu terlihat. | Lapisan tampilan; rumus dan bobot tidak berubah |
 | 1.0.15 | 12 Okt 2026 | §19 baru, keputusan pengguna untuk penggunaan uang nyata: (R37) **mandat risiko LIVE** aplikasi — maksimal **10 posisi** bersamaan, risiko **1% per trade**, risiko terbuka ≤ **10%**, **batas notional (gross) dihapus**, exit **TP1 = 2R (tutup 50%) + TP2 = 3R (sisa 50%)**, SL tetap di tempat setelah TP1, horizon 24 jam tetap; panel risiko portofolio (peringatan saja); rencana siap salin menampilkan TP1/TP2 dengan qty dibagi; perbaikan hasil jurnal (data yang belum terunduh tidak lagi menjadi "data tidak ada"). Mandat riset §6 tetap dipakai untuk reproduksi riset. Hasil uji data asli 2024–2026 dicatat apa adanya (§19.2), termasuk bahwa 10 posisi lebih buruk daripada 3 posisi dalam backtest. | **Bobot, rumus skor M1–M6, rumus M4, gate, dan ranking TIDAK berubah** (diuji: skor identik di kedua mandat) |
 | 1.0.16 | 12 Okt 2026 | §20 baru, keputusan pengguna: (R38) **posisi nyata pengguna** — tombol **Saya ambil** di kartu Decision (harga entry & qty yang benar-benar terisi; batal ambil), **posisi manual** di luar sinyal Malomo (tanpa skor; hasil otomatis dari candle 4H atau ditutup sendiri), panel risiko kini dihitung dari posisi nyata (diambil + manual) dengan baris pembanding semua sinyal, jurnal mendapat filter/kolom Diambil dan tabel posisi manual terpisah + CSV. | Catatan pengguna; **bobot, rumus skor, gate, ranking, harga & hasil sinyal TIDAK berubah** |
+| 1.0.17 | 12 Okt 2026 | §21 baru, keputusan pengguna: (R39) **Detail Pair** — klik nama pair di mana pun (Decision, Semua Pair, Jurnal, posisi manual) membuka panel berisi harga & pasar 24 jam, grafik 4H dengan **EMA 21/30/50**, funding/mark/index, Open Interest historis, **rasio long/short** (semua akun, top trader akun & posisi, taker beli/jual), orderbook & CVD live, data Malomo, dan aturan pair. Endpoint publik baru: `premiumIndex` dan lima statistik `/futures/data`. | **Informasi saja — bukan gate, tidak masuk skor**; bobot, rumus, gate, ranking tidak berubah |
 
 ## 0. Hirarki kewenangan dan larangan interpretasi
 
@@ -987,3 +988,56 @@ Keputusan pengguna 12 Oktober 2026. Aplikasi tetap tanpa API key dan tanpa order
 - tutup sendiri: hasil USDT, jurnal manual, CSV;
 - filter Diambil;
 - batal ambil.
+
+## 21. Detail Pair (v1.0.17)
+
+Keputusan pengguna 12 Oktober 2026. Detail Pair adalah **pelengkap informasi**: tidak menjadi gate, tidak masuk skor M1–M6, dan tidak mengubah keputusan, ranking, rencana, maupun jurnal. Semua data berasal dari endpoint publik Binance USDⓈ-M, tanpa API key dan tanpa order.
+
+### 21.1 R39 — Cara buka dan isi
+
+Panel dibuka dengan mengklik nama pair di kartu Decision, tabel Semua Pair, tabel Jurnal, atau posisi manual. Panel ditutup dengan tombol Tutup, klik di luar panel, atau tombol Escape. Membuka panel tidak memindahkan layar.
+
+1. **Harga & pasar 24 jam:** harga terakhir, % perubahan, high/low, dan volume, semuanya dari stream `!ticker@arr`, plus peringkat volume universe. Diperbarui tiap detik.
+2. **Grafik 4H + EMA 21/30/50:**
+   - grafik memuat 60 candle close terakhir, dengan nilai EMA, posisi close terhadap tiap EMA, dan susunan EMA (naik / turun / campuran);
+   - rumus EMA: EMA_t = α·close_t + (1−α)·EMA_{t−1}, α = 2/(n+1), EMA_0 = close_0, setara pandas `ewm(span=n, adjust=False)`;
+   - hanya candle yang **sudah close** yang dipakai;
+   - nilai EMA dianggap matang setelah ≥ 3n candle; kurang dari itu tampil "—", bukan 0;
+   - sumber candle: candle yang sudah diunduh aplikasi, atau 300 candle 4H publik untuk pair di luar unduhan;
+   - grafik punya hover: garis bantu dan tooltip OHLC + EMA.
+3. **Funding, mark & index:** dari `GET /fapi/v1/premiumIndex`, berisi funding rate terakhir, waktu funding berikutnya, mark price, index price, dan basis mark − index. Diperbarui tiap 30 detik.
+4. **Open Interest per 4 jam:** dari `GET /futures/data/openInterestHist` (period 4h, 42 titik ≈ 7 hari), berisi nilai OI terakhir, perubahan 4 jam dan 24 jam, dan sparkline.
+5. **Long / Short per 4 jam, 7 hari:** masing-masing dengan rasio terakhir, porsi long/short atau porsi beli, perubahan 24 jam, dan sparkline.
+   - `globalLongShortAccountRatio`: semua akun;
+   - `topLongShortAccountRatio`: top trader, akun;
+   - `topLongShortPositionRatio`: top trader, posisi;
+   - `takerlongshortRatio`: taker beli/jual.
+   
+   Binance hanya menyediakan statistik ini untuk 30 hari terakhir.
+6. **Orderbook & CVD live:** stream depth20 dan aggTrade untuk pair yang dibuka, sama seperti kartu Decision §18.
+7. **Data Malomo:** status (Decision / setup menunggu / tidak ada sinyal), struktur dan skor M1 pada close terakhir, serta skor sinyal yang sedang ada di Decision.
+8. **Aturan pair:** tick size, step size, min notional, status, leverage maksimum aman (dari jarak SL sinyal bila ada; bila tidak, batas pribadi R32/R34), dan MMR asumsi.
+
+Nilai yang tidak sah atau tidak tersedia tampil "—" atau "tidak tersedia", tidak pernah 0. Statistik dan EMA dimuat ulang 60 detik setelah setiap close 4H baru selama panel terbuka.
+
+### 21.2 Warna grafik
+
+Candle memakai warna LONG/SHORT aplikasi. EMA 21 = #3E9FD6, EMA 30 = #C27E1F, EMA 50 = #A766DE. Ketiganya lolos validator palet untuk latar gelap #13140F: lightness band, chroma, pemisahan buta warna ΔE ≥ 10, dan kontras ≥ 3:1. Identitas EMA tidak hanya bergantung pada warna: ada legenda dan label langsung 21/30/50 di ujung garis.
+
+### 21.3 Tes
+
+`scripts/test-pairinfo.js`:
+- EMA 21/30/50 identik pandas (400 close, selisih < 1e-9, fixture `pandas_ema_span_reference.json`);
+- hanya candle close, pemanasan 3n → null, susunan EMA, grafik 60 candle;
+- parser premiumIndex, OI historis, rasio long/short akun & posisi, taker (urutan, perubahan 4 jam & 24 jam, nilai rusak → null);
+- daftar endpoint: hanya `premiumIndex` dan lima statistik yang diizinkan; order dan endpoint lain ditolak sebelum jaringan.
+
+`scripts/test-browser.js`, desktop dan mobile:
+- panel dibuka dari Semua Pair, Decision, dan Jurnal tanpa pindah layar, dengan 8 bagian lengkap;
+- EMA di layar = hitungan Node atas candle yang sama;
+- grafik berisi 3 garis EMA dan 60 candle;
+- rasio long/short, funding, OI, dan aturan pair sesuai data;
+- tooltip hover, tanpa scroll horizontal;
+- tutup dengan Escape dan tombol.
+
+`scripts/live-check.js` menambah pemeriksaan endpoint asli: premiumIndex + 5 statistik untuk BTCUSDT.

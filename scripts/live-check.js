@@ -72,6 +72,13 @@ async function engineStep(raw,now){
       assert.equal(pl.status,'READY',s+' '+pl.status+' '+pl.reasons.join());o.push(s+' tick '+r.tickSize+' step '+r.stepSize+' min '+r.minNotional);}
     return o.join(', ');
   });
+  await step('R39 Detail Pair: premiumIndex + 5 statistik /futures/data (OI historis, long/short, taker) untuk BTCUSDT',async()=>{
+    const PI=require('../app/pairinfo');const f=PI.funding(await tr.premiumIndex('BTCUSDT'));assert(f&&f.mark>0&&Number.isFinite(f.ratePct)&&f.nextMs>0,'premiumIndex');
+    const out=['funding '+f.ratePct.toFixed(4)+'%'];
+    for(const [kind,parse] of [['openInterestHist',PI.openInterest],['globalLongShortAccountRatio',PI.ratio],['topLongShortAccountRatio',PI.ratio],['topLongShortPositionRatio',PI.ratio],['takerlongshortRatio',PI.taker]]){
+      const r=parse(await tr.futuresData(kind,'BTCUSDT','4h',42));assert(r.points.length>=30&&Number.isFinite(r.last),kind+' '+r.points.length);out.push(kind+' '+r.last.toFixed(3));}
+    return out.join(', ');
+  });
   await step('WebSocket ticker 6 pair (/market/stream …@ticker): harga live konsisten dengan kline',async()=>{
     assert(typeof WebSocket==='function','Node tanpa WebSocket global');
     const tk=Tr.createTicker({symbols:C.PAIRS,onTick:()=>{}});

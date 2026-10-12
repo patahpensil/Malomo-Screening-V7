@@ -3,7 +3,7 @@
    Aturan UI: tanpa tombol order; M6 selalu indeks (bukan win rate); null tampil "—"; arah = teks + ikon; waktu UTC + WITA. */
 (function(root){
   'use strict';
-  const M=root.Malomo,L=M.labels,X=M.exec,LG=M.ledger,PF=M.portfolio;
+  const M=root.Malomo,L=M.labels,X=M.exec,LG=M.ledger,PF=M.portfolio,PI=M.pairinfo;
   const e=L.esc;
   const fin=x=>typeof x==='number'&&Number.isFinite(x);
   const side=s=>`<span class="side ${e(s)}">${e(L.sideText(s))}</span>`;
@@ -160,6 +160,98 @@
       <div class="exf-actions"><button class="btn primary" data-action="${save}">Simpan</button><button class="btn" data-action="sheet-cancel">Batal</button></div></div>`;
   }
 
+  // ---------- R39 Detail Pair (informasi saja: bukan gate, tidak masuk skor) ----------
+  const EMA_COLOR={21:'#3E9FD6',30:'#C27E1F',50:'#A766DE'};   // tervalidasi: band L, CVD, kontras vs #13140F
+  const sgn=(v,d=2,suf='%')=>fin(v)?(v>=0?'+':'')+v.toFixed(d)+suf:'—';
+  function candleChart(ch,width){
+    const cs=ch.candles;if(!cs.length)return '<div class="muted small">Candle belum tersedia.</div>';
+    // lebar = lebar layar nyata (tanpa peregangan) supaya teks sumbu tetap 10 px dan tidak terpotong
+    const W=Math.round(fin(width)?width:640),H=240,P={l:4,r:66,t:10,b:12},n=cs.length,cw=(W-P.l-P.r)/n;
+    let lo=Infinity,hi=-Infinity;for(const x of cs){lo=Math.min(lo,x.low);hi=Math.max(hi,x.high);}
+    for(const k of PI.EMAS)for(const v of ch.ema[k])if(fin(v)){lo=Math.min(lo,v);hi=Math.max(hi,v);}
+    const pad=(hi-lo)*0.04||hi*0.01;lo-=pad;hi+=pad;
+    const y=v=>P.t+(hi-v)/(hi-lo)*(H-P.t-P.b),x=i=>P.l+cw*(i+0.5);
+    let g='';
+    for(let i=0;i<3;i++){const v=lo+(hi-lo)*(i+0.5)/3;g+=`<line x1="${P.l}" x2="${W-P.r}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" class="grid"/><text x="${W-P.r+4}" y="${(y(v)+3).toFixed(1)}" class="axis">${e(L.price(v))}</text>`;}
+    const body=Math.max(1,cw*0.6);
+    for(let i=0;i<n;i++){const c=cs[i],up=c.close>=c.open,cl=up?'up':'dn';
+      g+=`<line x1="${x(i).toFixed(1)}" x2="${x(i).toFixed(1)}" y1="${y(c.high).toFixed(1)}" y2="${y(c.low).toFixed(1)}" class="wick ${cl}"/>`;
+      const t=y(Math.max(c.open,c.close)),b=y(Math.min(c.open,c.close));
+      g+=`<rect x="${(x(i)-body/2).toFixed(1)}" y="${t.toFixed(1)}" width="${body.toFixed(1)}" height="${Math.max(1,b-t).toFixed(1)}" class="body ${cl}" rx="1"/>`;}
+    let lbl='';
+    for(const k of PI.EMAS){const vs=ch.ema[k];let d='',pen=false;
+      vs.forEach((v,i)=>{if(!fin(v)){pen=false;return;}d+=(pen?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)+' ';pen=true;});
+      if(d)g+=`<path d="${d}" fill="none" stroke="${EMA_COLOR[k]}" stroke-width="2" stroke-linejoin="round" data-ema="${k}"/>`;}
+    // direct label tanpa tumpang tindih: hanya bila jarak vertikal antar-label ≥ 11 px
+    const ends=PI.EMAS.map(k=>({k,v:ch.ema[k][ch.ema[k].length-1]})).filter(o=>fin(o.v)).sort((a,b)=>y(a.v)-y(b.v));
+    let lastY=-99;for(const o of ends){const yy=Math.max(y(o.v)+3,lastY+11);lbl+=`<text x="${W-P.r+4}" y="${yy.toFixed(1)}" class="axis lbl" fill="${EMA_COLOR[o.k]}">${o.k}</text>`;lastY=yy;}
+    return `<div class="chart-wrap"><div class="legend">${PI.EMAS.map(k=>`<span><i style="background:${EMA_COLOR[k]}"></i>EMA ${k}</span>`).join('')}<span class="muted">· 4H, ${n} candle close terakhir</span></div>
+      <svg class="pchart" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" data-chart data-n="${n}" data-pl="${P.l}" data-pr="${P.r}" data-w="${W}" role="img" aria-label="Grafik candle 4H dengan EMA 21, 30, 50">${g}${lbl}
+        <line class="xhair" x1="0" x2="0" y1="${P.t}" y2="${H-P.b}" visibility="hidden"/></svg><div class="chart-tip" id="dt-tip" hidden></div></div>`;
+  }
+  function chartTip(ch,i){
+    const c=ch.candles[i];if(!c)return '';
+    return `<b>${e(L.dateTime(c.t+PI.H4))}</b><br>O ${e(L.price(c.open))} · H ${e(L.price(c.high))} · L ${e(L.price(c.low))} · C ${e(L.price(c.close))}<br>`+
+      PI.EMAS.map(k=>`<span style="color:${EMA_COLOR[k]}">■</span> EMA${k} ${e(L.price(ch.ema[k][i]))}`).join(' · ');
+  }
+  function spark(points,color='var(--text-muted)'){
+    const p=points.slice(-42);if(p.length<2)return '';
+    const W=120,H=28,lo=Math.min(...p.map(x=>x.v)),hi=Math.max(...p.map(x=>x.v)),r=hi-lo||1;
+    const d=p.map((x,i)=>(i?'L':'M')+(i*(W-2)/(p.length-1)+1).toFixed(1)+' '+(H-2-(x.v-lo)/r*(H-4)).toFixed(1)).join(' ');
+    return `<svg class="spark" viewBox="0 0 ${W} ${H}" aria-hidden="true"><path d="${d}" fill="none" stroke="${color}" stroke-width="1.5"/></svg>`;
+  }
+  const dsec=(key,title,body)=>`<section class="dsec" data-dsec="${key}"><h4>${e(title)}</h4>${body}</section>`;
+  const kv=rows=>`<dl class="kv dkv">${rows.map(([k,v,attr])=>`<dt>${e(k)}</dt><dd${attr?` ${attr}`:''}>${v}</dd>`).join('')}</dl>`;
+  const pending=(d,k)=>d.err[k]?`<div class="muted small" data-derr="${k}">Tidak tersedia dari Binance (${e(d.err[k])}).</div>`:'<div class="muted small">memuat…</div>';
+  // Bagian live (harga 24 jam, orderbook, CVD) — diperbarui tiap detik tanpa menggambar ulang grafik.
+  function detailLive(c,d){
+    const sym=d.sym,t=c.market[sym]||{},ld=c.live.data(sym),rank=(c.app.universe&&c.app.universe.list.find(x=>x.symbol===sym)||{}).rank;
+    const c5=c.live.cvd5(sym);
+    const mkt=kv([['Harga terakhir',`<b class="mono">${e(L.price(t.price))}</b>`,'data-dv="price"'],['Perubahan 24 jam',`<span class="${fin(t.changePct)?(t.changePct>=0?'pos':'neg'):''}">${e(sgn(t.changePct))}</span>`],
+      ['High / Low 24 jam',`${e(L.price(t.high))} / ${e(L.price(t.low))}`,'data-dv="hl"'],['Volume 24 jam',e(L.compactUsd(t.quoteVolume))],['Peringkat volume',rank?'#'+rank+' dari 100':'di luar 100 besar']]);
+    const ob=ld.imb!==undefined?kv([['Bid / Ask (20 level)',`Bid ${Math.round((1+ld.imb)*50)}% · Ask ${Math.round((1-ld.imb)*50)}%`],['Nilai bid / ask',`${e(L.compactUsd(ld.bidUsd))} / ${e(L.compactUsd(ld.askUsd))}`],['Spread',ld.bid>0&&ld.ask>0?((ld.ask-ld.bid)/ld.bid*100).toFixed(3)+'%':'—']]):'<div class="muted small">menyambung orderbook…</div>';
+    const cvd=ld.wsOn||(ld.cvdWin&&ld.cvdWin.length)?kv([['CVD taker sejak dibuka',`<span class="${ld.cvd>=0?'pos':'neg'}">${ld.cvd>=0?'+':''}${e(L.compactUsd(ld.cvd))}</span>`],['CVD 5 menit',`${c5>=0?'+':''}${e(L.compactUsd(c5))}`]]):'<div class="muted small">menunggu trade pertama…</div>';
+    return {market:dsec('market','1 · Harga & pasar 24 jam',mkt),book:dsec('book','6 · Orderbook & CVD (live)',ob+cvd)};
+  }
+  function pairDetail(c,d){
+    if(!d)return '';
+    const sym=d.sym,D=d.data,em=D.ema;
+    let h=`<div class="detail-back" data-action="detail-close"></div><aside class="detail" role="dialog" aria-modal="true" aria-label="Detail ${e(sym)}" data-detail="${e(sym)}">
+      <div class="detail-head"><h3>${e(sym)}</h3><span class="chip neutral">informasi · bukan gate</span><button class="btn" data-action="detail-close" aria-label="Tutup detail">Tutup ✕</button></div>
+      <div id="dt-market">${detailLive(c,d).market}</div>`;
+    // 2 · grafik & EMA
+    let emaBody;
+    if(em){emaBody=candleChart(em.chart,d.w)+kv(PI.EMAS.map(k=>[`EMA ${k}`,fin(em.last[k])?`<span class="mono">${e(L.price(em.last[k]))}</span> · close ${e(PI.LABEL[em.pos[k]]||'—')} EMA`:'— (riwayat kurang)',`data-dv="ema${k}"`]))
+        +`<div class="muted small" data-dv="emaorder">${e(PI.LABEL[em.order]||'—')} · close terakhir ${e(L.price(em.close))} (${e(L.time(em.closeMs))})</div>`;}
+    else emaBody=pending(d,'ema');
+    h+=dsec('ema','2 · Grafik 4H + EMA 21 / 30 / 50',emaBody);
+    // 3 · funding
+    const f=D.funding;
+    h+=dsec('funding','3 · Funding, mark & index',f?kv([['Funding rate terakhir',`<span class="${fin(f.ratePct)?(f.ratePct>=0?'pos':'neg'):''}">${e(sgn(f.ratePct,4))}</span>`,'data-dv="funding"'],['Funding berikutnya',e(L.time(f.nextMs))],['Mark price',e(L.price(f.mark))],['Index price',e(L.price(f.index))],['Basis mark − index',e(sgn(f.basisPct,3))]]):pending(d,'funding'));
+    // 4 · OI
+    const oi=D.oi;
+    h+=dsec('oi','4 · Open Interest (per 4 jam)',oi&&fin(oi.last)?kv([['OI sekarang',`${e(L.compactUsd(oi.last))} ${spark(oi.points)}`,'data-dv="oi"'],['Perubahan 4 jam',e(sgn(oi.chg4hPct))],['Perubahan 24 jam',e(sgn(oi.chg24hPct))]]):pending(d,'oi'));
+    // 5 · long/short
+    const rr=(k,label,x)=>x&&fin(x.last)?[label,`<span class="mono">${x.last.toFixed(2)}</span>${fin(x.longPct)?` · L ${x.longPct.toFixed(1)}% / S ${x.shortPct.toFixed(1)}%`:''}${fin(x.buyPct)?` · beli ${x.buyPct.toFixed(1)}%`:''} · 24j ${e(sgn(x.chg24hPct))} ${spark(x.points)}`,`data-dv="${k}"`]:[label,d.err[k]?'tidak tersedia':'memuat…',`data-dv="${k}"`];
+    h+=dsec('ls','5 · Long / Short (per 4 jam, 7 hari)',kv([rr('gls','Semua akun (long/short)',D.gls),rr('tla','Top trader — akun',D.tla),rr('tlp','Top trader — posisi',D.tlp),rr('taker','Taker beli / jual',D.taker)])
+      +'<div class="muted small">Rasio &gt; 1 = lebih banyak long (atau beli). Data Binance hanya tersedia 30 hari terakhir.</div>');
+    h+=`<div id="dt-book">${detailLive(c,d).book}</div>`;
+    // 7 · Malomo
+    const pr=c.state&&(c.state.pairRows||[]).find(r=>r.symbol===sym),act=LG.active(c.ledger,c.now).filter(x=>x.symbol===sym);
+    const status=act.length?'Decision':pr&&pr.waiting?'Setup menunggu':'Tidak ada sinyal';
+    let mal=kv([['Status',`<span class="chip ${act.length?'primary':pr&&pr.waiting?'warn':'neutral'}" data-dv="status">${e(status)}</span>`],['Struktur M1',pr?e(L.STRUCT[pr.structure]||'—'):'pair belum dianalisis'],['Skor M1',pr?sc(pr.m1,100):'—','data-dv="m1"']]);
+    for(const en of act)mal+=`<div class="muted small" data-dv="dec">${side(en.side)} ${e(L.FAMILY[en.family]||en.family)} · M6 ${sc(en.scores.m6,500)} · M1+M2q ${sc(en.scores.m1m2q,180)} · keputusan ${e(L.time(en.decisionMs))}</div>`;
+    h+=dsec('malomo','7 · Data Malomo',mal);
+    // 8 · aturan pair
+    const rl=c.ex.rules[sym],rank=(c.app.universe&&c.app.universe.list.find(x=>x.symbol===sym)||{}).rank;
+    const cap=X.MAX_LEV[sym]??(Number.isInteger(rank)&&rank<=X.TOP_TIER?X.MAX_LEV.DEFAULT:X.MAX_LEV.SMALL);
+    const levs=act.map(en=>X.safeLeverage(Math.abs(en.entry-en.stop)/en.entry,sym,rank)).filter(fin);
+    h+=dsec('rules','8 · Aturan pair',rl?kv([['Tick size',`<span class="mono">${e(rl.tickSize)}</span>`],['Step size',`<span class="mono">${e(rl.stepSize)}</span>`],['Min notional',e(rl.minNotional+' USDT')],['Status',e(rl.status)],
+      ['Leverage maks aman',levs.length?`<b>${levs.join('× / ')}×</b> (dari jarak SL sinyal)`:`batas pribadi ${cap}× · dihitung per sinyal dari jarak SL`,'data-dv="lev"'],['MMR asumsi',(X.mmrOf(sym,rank)*100).toFixed(1)+'%']]):'<div class="muted small">Aturan pair belum dimuat.</div>');
+    h+=`<div class="muted small" style="margin-top:8px">Semua data di panel ini hanya informasi: bukan gate, tidak masuk skor M1–M6, dan tidak mengubah keputusan. Data publik Binance, tanpa API key.</div></aside>`;
+    return h;
+  }
+
   // ---------- Layar 1: Decision ----------
   const invShort=inv=>!inv?'—':inv.rule==='CLOSE_BELOW_LEVEL_MINUS_R'?'Invalidasi: close < '+L.price(inv.price):inv.rule==='CLOSE_ABOVE_LEVEL_PLUS_R'?'Invalidasi: close > '+L.price(inv.price):'Invalidasi: kedalaman > 0.85 ('+L.price(inv.price)+')';
   function decisionCard(en,c){
@@ -257,7 +349,7 @@
     h+=`<div class="table-wrap"><table class="journal"><thead><tr><th>Keputusan</th><th>Pair</th><th>Arah</th><th>Keluarga</th><th class="num">M1+M2q</th><th class="num">M6</th><th>Rezim BTC</th>
       <th class="num">Entry</th><th class="num">SL</th><th class="num">TP1</th><th class="num">TP2</th><th>Hasil</th><th class="num">Keluar</th><th class="num">R</th><th>Diambil</th></tr></thead><tbody>`;
     for(const r of rows.slice(0,300)){const o=r.outcome;
-      h+=`<tr data-jrow="${e(r.key)}"><td class="small">${e(L.dateTime(r.decisionMs))}</td><td><b>${e(r.symbol)}</b>${r.rank?` <span class="muted small">#${r.rank}</span>`:''}</td><td>${side(r.side)}</td><td>${e(L.FAMILY[r.family]||r.family)}</td>
+      h+=`<tr data-jrow="${e(r.key)}"><td class="small">${e(L.dateTime(r.decisionMs))}</td><td><a class="pair-link" href="#" data-action="pair" data-sym="${e(r.symbol)}"><b>${e(r.symbol)}</b></a>${r.rank?` <span class="muted small">#${r.rank}</span>`:''}</td><td>${side(r.side)}</td><td>${e(L.FAMILY[r.family]||r.family)}</td>
         <td class="num">${sc(r.scores.m1m2q)}</td><td class="num">${sc(r.scores.m6)}</td><td>${regimeChip(r.regime)||'—'}</td>
         <td class="num mono">${e(L.price(r.entry))}</td><td class="num mono">${e(L.price(r.stop))}</td><td class="num mono">${e(L.price(r.target))}</td><td class="num mono">${fin(r.target2)?e(L.price(r.target2)):'—'}</td>
         <td><span class="chip ${o.code==='TARGET_HIT'?'primary':o.code==='STOP_HIT'?'reject':'neutral'}">${e(LG.outcomeText(r))}</span><div class="muted small">${o.tp1AtMs?'TP1 '+e(L.time(o.tp1AtMs))+' · ':''}${e(L.time(o.atMs))}</div></td>
@@ -282,5 +374,5 @@
       <div class="table-wrap"><table class="journal"><thead><tr><th>Dibuka</th><th>Pair</th><th>Arah</th><th class="num">Entry</th><th class="num">SL</th><th class="num">TP1</th><th class="num">TP2</th><th>Hasil</th><th class="num">Keluar</th><th class="num">USDT</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   }
 
-  root.Malomo.ui={health,universeLine,regimeChip,riskPanel,riskNumbers,manualList,sheet,execForm,execSaveStatus,execPanel,decisionCard,decisionList,decisionScreen,pairsRows,pairsScreen,journalScreen};
+  root.Malomo.ui={health,universeLine,regimeChip,riskPanel,riskNumbers,manualList,sheet,pairDetail,detailLive,chartTip,execForm,execSaveStatus,execPanel,decisionCard,decisionList,decisionScreen,pairsRows,pairsScreen,journalScreen};
 })(globalThis);

@@ -6,6 +6,7 @@
    - WebSocket ticker 6 pair dengan watchdog 20 detik dan reconnect bertahap.
    - exchangeInfo publik (PRD v1.0.11 R32): aturan tick/step/min notional untuk rencana siap salin.
    - ticker/24hr + kline 1d publik (PRD v1.0.12 R34): ranking universe 100 pair pada close harian 00:00 UTC.
+   - premiumIndex + /futures/data (PRD v1.0.17 R39): data Detail Pair (informasi saja, bukan gate, tidak masuk skor).
    Hanya endpoint publik baca-saja. Tidak ada API key dan tidak ada endpoint order. */
 (function(root,factory){
   if(typeof module==='object'&&module.exports)module.exports=factory();
@@ -16,7 +17,10 @@
   const H4=4*3600*1000;
   const RETRY_DELAYS=Object.freeze([30000,60000,120000]);
   // Hanya path baca-saja ini yang boleh diminta; apa pun di luar daftar ditolak sebelum menyentuh jaringan.
-  const ALLOWED=[/^\/fapi\/v1\/time$/,/^\/fapi\/v1\/klines\?/,/^\/fapi\/v1\/openInterest\?/,/^\/fapi\/v1\/exchangeInfo$/,/^\/fapi\/v1\/ticker\/24hr$/];
+  // R39 Detail Pair: premiumIndex (funding/mark/index) + statistik publik /futures/data (OI historis, rasio long/short, taker).
+  const FUTURES_DATA=['openInterestHist','globalLongShortAccountRatio','topLongShortAccountRatio','topLongShortPositionRatio','takerlongshortRatio'];
+  const ALLOWED=[/^\/fapi\/v1\/time$/,/^\/fapi\/v1\/klines\?/,/^\/fapi\/v1\/openInterest\?/,/^\/fapi\/v1\/exchangeInfo$/,/^\/fapi\/v1\/ticker\/24hr$/,
+    /^\/fapi\/v1\/premiumIndex\?symbol=[A-Z0-9]+$/,new RegExp('^/futures/data/('+FUTURES_DATA.join('|')+')\\?symbol=[A-Z0-9]+&period=(5m|15m|30m|1h|2h|4h|6h|12h|1d)&limit=\\d{1,3}$')];
 
   function createTransport({fetchImpl=(...a)=>fetch(...a),now=()=>Date.now(),sleep=ms=>new Promise(r=>setTimeout(r,ms)),gapMs=200,timeoutMs=20000,base=REST}={}){
     let tail=Promise.resolve(),cooldownUntil=0,clockOffset=0;
@@ -67,7 +71,10 @@
     // Universe R34: volume 24 jam semua pair (kumpulan kandidat) dan candle harian untuk ranking pada close 00:00 UTC.
     const ticker24hr=()=>request('/fapi/v1/ticker/24hr');
     const dailyKlines=(symbol,limit=3)=>request('/fapi/v1/klines?symbol='+encodeURIComponent(symbol)+'&interval=1d&limit='+limit);
-    return {request,syncClock,serverNow,klines,openInterest,exchangeInfo,ticker24hr,dailyKlines,clearCache:()=>cache.clear(),_state:()=>({cooldownUntil,clockOffset,cacheSize:cache.size})};
+    const premiumIndex=symbol=>request('/fapi/v1/premiumIndex?symbol='+encodeURIComponent(symbol));
+    const futuresData=(kind,symbol,period='4h',limit=42)=>{if(!FUTURES_DATA.includes(kind))return Promise.reject(new Error('Statistik tidak diizinkan: '+kind));
+      return request('/futures/data/'+kind+'?symbol='+encodeURIComponent(symbol)+'&period='+period+'&limit='+limit);};
+    return {request,syncClock,serverNow,klines,openInterest,exchangeInfo,ticker24hr,dailyKlines,premiumIndex,futuresData,clearCache:()=>cache.clear(),_state:()=>({cooldownUntil,clockOffset,cacheSize:cache.size})};
   }
 
   /* FETCH_FAILED (PRD §1): satu percobaan awal + 3 percobaan ulang (jeda 30/60/120 detik). onAttemptFailed dipanggil
@@ -115,8 +122,10 @@
      realtime dan harga kartu Decision. Snapshot awal dari REST /fapi/v1/ticker/24hr (seed). Watchdog & reconnect sama. */
   function createMarketTicker({onUpdate,WebSocketImpl=typeof WebSocket!=='undefined'?WebSocket:null,now=()=>Date.now(),setTimer=setTimeout,clearTimer=clearTimeout,base=WS}={}){
     const tickers={};let sock=null,last=0,opened=0,delay=2000,timer=null,stopped=false;
-    const put=(sym,price,changePct,quoteVolume,at)=>{if(!sym||!(price>0))return;tickers[sym]={price,changePct,quoteVolume:Number.isFinite(quoteVolume)?quoteVolume:(tickers[sym]&&tickers[sym].quoteVolume),at};};
-    function seed(rows){const t=now();for(const r of Array.isArray(rows)?rows:[])put(r.symbol,Number(r.lastPrice),Number(r.priceChangePercent),Number(r.quoteVolume),t);}
+    const keep=(v,old)=>Number.isFinite(v)?v:old;
+    const put=(sym,price,changePct,quoteVolume,at,high,low)=>{if(!sym||!(price>0))return;const o=tickers[sym]||{};
+      tickers[sym]={price,changePct,quoteVolume:keep(quoteVolume,o.quoteVolume),high:keep(high,o.high),low:keep(low,o.low),at};};
+    function seed(rows){const t=now();for(const r of Array.isArray(rows)?rows:[])put(r.symbol,Number(r.lastPrice),Number(r.priceChangePercent),Number(r.quoteVolume),t,Number(r.highPrice),Number(r.lowPrice));}
     function connect(){
       if(stopped||!WebSocketImpl)return;
       let w;try{w=new WebSocketImpl(base+'/market/stream?streams=!ticker@arr');}catch{schedule();return;}
@@ -124,7 +133,7 @@
       w.onopen=()=>{delay=2000;};
       w.onmessage=e=>{
         try{const m=JSON.parse(e.data),d=m&&m.data;if(!Array.isArray(d))return;last=now();
-          for(const x of d)put(x.s,Number(x.c),Number(x.P),Number(x.q),last);onUpdate&&onUpdate(d.length);}
+          for(const x of d)put(x.s,Number(x.c),Number(x.P),Number(x.q),last,Number(x.h),Number(x.l));onUpdate&&onUpdate(d.length);}
         catch{/* pesan rusak tidak mengubah data */}
       };
       w.onerror=()=>{try{w.close();}catch{/* sudah tertutup */}};
@@ -136,5 +145,5 @@
     return {tickers,prices:tickers,seed,watchdog,isLive:()=>!!sock&&sock.readyState===1&&last>0&&now()-last<20000,
       stop(){stopped=true;clearTimer(timer);if(sock){const w=sock;sock=null;try{w.close();}catch{/* sudah tertutup */}}},_delay:()=>delay};
   }
-  return {REST,WS,RETRY_DELAYS,createTransport,withRetry,createTicker,createMarketTicker};
+  return {REST,WS,RETRY_DELAYS,FUTURES_DATA,createTransport,withRetry,createTicker,createMarketTicker};
 });

@@ -4,11 +4,11 @@
    Decision terkunci (R35) — semuanya hanya di browser ini. */
 (function(root){
   'use strict';
-  const M=root.Malomo,C=M.core,Cy=M.cycle,U=M.ui,L=M.labels,Tr=M.transport,X=M.exec,UV=M.universe,LG=M.ledger,PF=M.portfolio;
+  const M=root.Malomo,C=M.core,Cy=M.cycle,U=M.ui,L=M.labels,Tr=M.transport,X=M.exec,UV=M.universe,LG=M.ledger,PF=M.portfolio,PI=M.pairinfo;
   const $=id=>document.getElementById(id);
   const SCREENS=['decision','pairs','jurnal'];
   const app={state:null,loading:true,frozen:null,frozenJson:null,meta:{files:{},build:null},raw:{},failed:new Set(),cycleId:0,progress:null,
-    universe:null,snap:null,eligible:null,ei:null,ledger:LG.empty(),manual:PF.emptyManual(),
+    universe:null,snap:null,eligible:null,ei:null,ledger:LG.empty(),manual:PF.emptyManual(),detail:null,
     view:{screen:'decision',pf:{structure:'',status:'',sort:'rank',q:''},jf:{pair:'',side:'',family:'',taken:'',outcome:'',m6min:'',m6max:''},sheet:null},timers:{},
     exec:{settings:{capital:'',riskPct:String(X.DEFAULTS.riskPct),costBps:String(X.DEFAULTS.costBps)},draft:null,dirty:false,savedAt:null,saveError:false,justSaved:false,
       rules:{},rulesAt:null,rulesError:null,rulesErrorAt:null,rulesLoading:false}};
@@ -140,7 +140,7 @@
       if(PF.resolveManual(app.manual,app.raw,now).length)store('manual',app.manual);
     }else app.error=err;
     app.loading=false;
-    live.sync(LG.active(app.ledger,transport.serverNow()).map(e=>e.symbol));live.pollOI();
+    live.sync(liveSyms());live.pollOI();
     render();
   }
   // Candle 4H: unduhan penuh (1.500) sekali, siklus berikutnya cukup 10 candle terakhir lalu digabung (R34).
@@ -181,6 +181,48 @@
     app.timers.cycle=setTimeout(runCycle,waitingOpen?15000:Math.max(1000,next-now));
   }
 
+  // ---------- R39 Detail Pair (informasi saja; bukan gate, tidak masuk skor) ----------
+  const liveSyms=()=>[...new Set([...LG.active(app.ledger,transport.serverNow()).map(e=>e.symbol),...(app.detail?[app.detail.sym]:[])])];
+  const FD={oi:['openInterestHist',PI.openInterest],gls:['globalLongShortAccountRatio',PI.ratio],tla:['topLongShortAccountRatio',PI.ratio],tlp:['topLongShortPositionRatio',PI.ratio],taker:['takerlongshortRatio',PI.taker]};
+  function renderDetail(){const el=$('detail');if(!el)return;el.innerHTML=U.pairDetail(ctx(),app.detail);el.hidden=!app.detail;}
+  function renderDetailLive(){if(!app.detail)return;const v=U.detailLive(ctx(),app.detail),m=$('dt-market'),b=$('dt-book');if(m)m.innerHTML=v.market;if(b)b.innerHTML=v.book;}
+  const errText=err=>String(err&&err.message||err||'gagal').replace(/^Binance /,'');
+  async function loadDetailCandles(d){
+    const now=transport.serverNow();let c=app.raw[d.sym];
+    try{if(!c||!c.length)c=(await transport.klines(d.sym,300)).map(Cy.toCandle);
+      if(app.detail!==d)return;d.data.ema=PI.emaInfo(c,now);delete d.err.ema;}
+    catch(err){if(app.detail===d)d.err.ema=errText(err);}
+    if(app.detail===d)renderDetail();
+  }
+  async function loadDetailFunding(d){
+    try{const f=PI.funding(await transport.premiumIndex(d.sym));if(app.detail!==d)return;d.data.funding=f;delete d.err.funding;}
+    catch(err){if(app.detail===d)d.err.funding=errText(err);}
+    d.fundingAt=transport.serverNow();if(app.detail===d)renderDetail();
+  }
+  async function loadDetailStats(d){
+    await Promise.all(Object.entries(FD).map(async([k,[kind,parse]])=>{
+      try{const rows=await transport.futuresData(kind,d.sym,'4h',42);if(app.detail!==d)return;d.data[k]=parse(rows);delete d.err[k];}
+      catch(err){if(app.detail===d)d.err[k]=errText(err);}
+    }));
+    d.statsAt=transport.serverNow();if(app.detail===d)renderDetail();
+  }
+  function openDetail(sym){
+    if(!sym)return;
+    // lebar grafik = lebar panel nyata (panel maks 720 px, padding 16 + kartu 12 di tiap sisi)
+    const vw=(root.innerWidth||720),w=Math.round(Math.min(720,vw)-2*16-2*13);
+    app.detail={sym,data:{},err:{},openedAt:transport.serverNow(),w:Math.max(260,w)};const d=app.detail;
+    renderDetail();live.sync(liveSyms());live.pollOI();
+    loadDetailCandles(d);loadDetailFunding(d);loadDetailStats(d);
+  }
+  function closeDetail(){app.detail=null;renderDetail();live.sync(liveSyms());}
+  // Selama terbuka: bagian live tiap detik; funding tiap 30 detik; statistik & EMA diperbarui setelah candle 4H baru close.
+  function tickDetail(now){
+    const d=app.detail;if(!d)return;renderDetailLive();
+    if(d.fundingAt&&now-d.fundingAt>30000){d.fundingAt=now;loadDetailFunding(d);}
+    // statistik 4 jam Binance terbit sesaat setelah close → muat ulang 60 detik setelah close 4H baru
+    if(d.statsAt&&Cy.lastClosedT(now)>Cy.lastClosedT(d.statsAt)&&now-Cy.lastClosedT(now)>60000){d.statsAt=now;loadDetailStats(d);loadDetailCandles(d);}
+  }
+
   // ---------- tampilan ----------
   function setScreen(s){
     if(!SCREENS.includes(s))s='decision';app.view.screen=s;store('screen',s);
@@ -210,7 +252,7 @@
   }
   let lastPairsRender=0,lastUniverse=0;
   function tick(){
-    tickClock();live.tick();if(market)market.watchdog();
+    tickClock();live.tick();if(market)market.watchdog();tickDetail(transport.serverNow());
     const now=transport.serverNow();
     if(app.view.screen==='decision'&&app.state){const el=$('dec-list');if(el)el.innerHTML=U.decisionList(ctx());const mn=$('man-list');if(mn)mn.innerHTML=U.manualList(ctx());}
     // Universe realtime: ranking ulang tiap 5 detik dari stream; pair baru diunduh di latar.
@@ -230,7 +272,8 @@
     document.addEventListener('click',ev=>{
       const act=ev.target.closest('[data-action]');if(!act)return;
       const a=act.dataset.action;
-      if(a==='pair'){ev.preventDefault();return;}   // detail pair (menunggu persetujuan rancangan) — tautan tidak berpindah layar
+      if(a==='pair'){ev.preventDefault();openDetail(act.dataset.sym);return;}
+      if(a==='detail-close'){closeDetail();return;}
       if(a==='copy-val'){ev.stopPropagation();const txt=act.dataset.val||'';(navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject()).then(()=>{act.textContent='Tersalin';},()=>{act.textContent='Gagal';});return;}
       // R36: pengaturan modal hanya berlaku setelah tombol Simpan ditekan dan nilainya sah.
       if(a==='save-exec'){const ex=app.exec,v=X.validateSettings(ex.draft);
@@ -280,7 +323,14 @@
       const st=document.getElementById('exec-save-status');if(st)st.outerHTML=U.execSaveStatus(ex);
       const b=document.querySelector('[data-save-badge]');if(b)b.outerHTML=ex.dirty?'<span class="chip warn" data-save-badge="dirty">● belum disimpan</span>':'<span class="chip primary" data-save-badge="saved">✓ tersimpan</span>';
     });
-    document.addEventListener('keydown',ev=>{if(ev.key==='Escape'&&app.view.sheet){app.view.sheet=null;renderSheet();}});
+    document.addEventListener('keydown',ev=>{if(ev.key!=='Escape')return;if(app.view.sheet){app.view.sheet=null;renderSheet();}else if(app.detail)closeDetail();});
+    // R39 hover grafik detail: garis bantu + tooltip candle terdekat.
+    document.addEventListener('pointermove',ev=>{const svg=ev.target.closest&&ev.target.closest('[data-chart]');const tip=$('dt-tip');
+      if(!svg||!tip||!app.detail||!app.detail.data.ema){if(tip&&!tip.hidden&&!svg){tip.hidden=true;const xh=document.querySelector('[data-chart] .xhair');if(xh)xh.setAttribute('visibility','hidden');}return;}
+      const r=svg.getBoundingClientRect(),W=+svg.dataset.w,n=+svg.dataset.n,pl=+svg.dataset.pl,pr=+svg.dataset.pr,xv=(ev.clientX-r.left)/r.width*W;
+      const i=Math.max(0,Math.min(n-1,Math.floor((xv-pl)/((W-pl-pr)/n))));const cx=pl+(W-pl-pr)/n*(i+0.5);
+      const xh=svg.querySelector('.xhair');xh.setAttribute('x1',cx);xh.setAttribute('x2',cx);xh.setAttribute('visibility','visible');
+      tip.innerHTML=U.chartTip(app.detail.data.ema.chart,i);tip.hidden=false;tip.dataset.i=i;});
     document.addEventListener('visibilitychange',()=>{if(!document.hidden&&app.state&&Cy.lastClosedT(transport.serverNow())>app.state.T)runCycle();});
   }
 
@@ -298,6 +348,6 @@
     await runCycle();
     if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('sw.js').catch(()=>{});
   }
-  root.MalomoApp={app,renderSheet,rebuildNow,runCycle,render,transport,live,journalFilter,get ticker(){return market;},get market(){return market;}};
+  root.MalomoApp={app,renderSheet,openDetail,closeDetail,rebuildNow,runCycle,render,transport,live,journalFilter,get ticker(){return market;},get market(){return market;}};
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
 })(globalThis);

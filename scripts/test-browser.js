@@ -7,7 +7,7 @@ const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),
 let pw;try{pw=require(process.env.PLAYWRIGHT_MODULE||'playwright');}catch{pw=require('/opt/npm-tools/node_modules/playwright');}
 const {chromium}=pw;
 const ROOT=path.resolve(__dirname,'..'),SITE=path.join(ROOT,'_site');
-const C=require('../engine/core'),M2=require('../engine/m2'),Cy=require('../app/cycle'),X=require('../app/exec'),UV=require('../app/universe'),LG=require('../app/ledger'),S=require('./synthetic');
+const C=require('../engine/core'),M2=require('../engine/m2'),Cy=require('../app/cycle'),X=require('../app/exec'),UV=require('../app/universe'),LG=require('../app/ledger'),PI=require('../app/pairinfo'),S=require('./synthetic');
 const H4=C.H4;
 if(!fs.existsSync(path.join(SITE,'index.html'))){console.error('Jalankan node scripts/build-site.js dulu');process.exit(1);}
 const FROZEN=M2.frozenFrom(JSON.parse(fs.readFileSync(path.join(ROOT,'evidence/frozen_cdf_normalization.json'),'utf8')),JSON.parse(fs.readFileSync(path.join(ROOT,'evidence/frozen_v2_normalizations.json'),'utf8')));
@@ -44,6 +44,12 @@ function riskOf(rp){const act=ACTIVE,open=act.filter(x=>x.outcome.code==='OPEN')
   const openRiskPct=open.reduce((s,x)=>s+(x.outcome.tp1AtMs?1-x.tp1Frac:1),0)*rp;
   let cum=0,peak=0;for(const x of FINISHED.filter(x=>Number.isFinite(x.outcome.r)&&Number.isFinite(x.outcome.atMs)).sort((a,b)=>a.outcome.atMs-b.outcome.atMs)){cum+=x.outcome.r*rp;peak=Math.max(peak,cum);}
   return {positions:act.length,openRiskPct,ddPct:peak-cum,cumPct:cum};}
+// R39 data Detail Pair tiruan (deterministik): premiumIndex + 42 baris statistik 4 jam per jenis.
+const PREMIUM=sym=>{const c=RAW[sym]?Number(RAW[sym].find(k=>k[0]===T)[4]):1;return {symbol:sym,markPrice:String(c*1.0002),indexPrice:String(c),lastFundingRate:'0.00012',nextFundingTime:T+4*3600e3};};
+const FDATA=(kind,sym)=>Array.from({length:42},(_,k)=>{const ts=T-(41-k)*4*3600e3,v=0.8+0.01*k;
+  if(kind==='openInterestHist')return {symbol:sym,sumOpenInterest:String(1000+k),sumOpenInterestValue:String(1e6+1e4*k),timestamp:ts};
+  if(kind==='takerlongshortRatio')return {buySellRatio:String(v),buyVol:String(100*v),sellVol:'100',timestamp:ts};
+  return {symbol:sym,longShortRatio:String(v+(kind==='topLongShortPositionRatio'?0.5:kind==='topLongShortAccountRatio'?0.25:0)),longAccount:String(v/(1+v)),shortAccount:String(1/(1+v)),timestamp:ts};});
 const coreOnly=Cy.buildState({rawBySymbol:Object.fromEntries(C.PAIRS.map(s=>[s,RAW[s].filter(k=>k[0]<=NOW).slice(-1500).map(Cy.toCandle)])),now:NOW,frozen:FROZEN});
 
 // exchangeInfo tiruan (format resmi: filter terpisah) untuk rencana siap salin R32.
@@ -100,6 +106,9 @@ async function setup(browser,viewport,{failSymbol=null,noForming=false,eiFail=fa
       const rows=RAW[s].filter(k=>k[0]<=NOW&&!(noForming&&k[0]===T)).slice(-lim);
       return route.fulfill({json:rows});
     }
+    // R39 Detail Pair
+    if(u.pathname==='/fapi/v1/premiumIndex')return route.fulfill({json:PREMIUM(u.searchParams.get('symbol'))});
+    if(u.pathname.startsWith('/futures/data/'))return route.fulfill({json:FDATA(u.pathname.split('/').pop(),u.searchParams.get('symbol'))});
     return route.fulfill({status:404,body:'not mocked'});
   });
   await page.goto('http://127.0.0.1:'+server.address().port+'/#decision');
@@ -222,6 +231,44 @@ const nav=async(page,viewport,screen)=>{await page.locator((viewport.width<768?'
         page.once('dialog',d=>d.accept());await page.locator(`[data-taken="${en.key}"] [data-action="untake"]`).click();
         await page.waitForSelector(`[data-action="take-open"][data-key="${en.key}"]`);assert.equal(await page.locator('[data-risk="positions"] .v').innerText(),'0 / 10');
         await common(page,viewport);
+      });
+      await run(`[${viewport.width}px] R39 Detail Pair: klik dari Semua Pair / Decision / Jurnal → 8 bagian, EMA = engine Node, data Binance, tutup`,async()=>{
+        const L2=require('../app/labels');
+        await nav(page,viewport,'pairs');await page.waitForSelector('#pairs-body tr[data-pair]');
+        const sym=UNIVERSE[0].symbol;
+        await page.locator(`#pairs-body tr[data-pair="${sym}"] [data-action="pair"]`).click();
+        await page.waitForSelector(`[data-detail="${sym}"]`);assert.equal(await page.evaluate(()=>location.hash),'#pairs','klik pair tidak berpindah layar');
+        for(const k of ['market','ema','funding','oi','ls','book','malomo','rules'])assert.equal(await page.locator(`[data-dsec="${k}"]`).count(),1,'bagian '+k);
+        // EMA = hitungan Node atas candle yang sama
+        await page.waitForSelector('[data-chart]',{timeout:15000});
+        const em=PI.emaInfo(CANDLES[sym],NOW);
+        for(const n of [21,30,50]){const t=await page.locator(`[data-dv="ema${n}"]`).innerText();assert(t.startsWith(L2.price(em.last[n])),`EMA${n} ${t} vs ${L2.price(em.last[n])}`);}
+        assert.equal(await page.locator('[data-chart] path[data-ema]').count(),3);assert.equal(await page.locator('[data-chart] rect.body').count(),em.chart.candles.length);
+        // data Binance (tiruan deterministik)
+        await page.waitForSelector('[data-dv="gls"] .mono');
+        const want=PI.ratio(FDATA('globalLongShortAccountRatio',sym));assert((await page.locator('[data-dv="gls"]').innerText()).startsWith(want.last.toFixed(2)));
+        assert((await page.locator('[data-dv="tlp"]').innerText()).startsWith(PI.ratio(FDATA('topLongShortPositionRatio',sym)).last.toFixed(2)));
+        assert((await page.locator('[data-dv="taker"]').innerText()).includes('beli'));
+        assert((await page.locator('[data-dv="funding"]').innerText()).includes('+0.0120%'));
+        assert((await page.locator('[data-dv="oi"]').innerText()).includes(L2.compactUsd(1e6+1e4*41)));
+        assert((await page.locator('[data-dsec="rules"]').innerText()).includes(TICK[sym]));
+        // hover grafik → tooltip candle
+        const box=await page.locator('[data-chart]').boundingBox();await page.mouse.move(box.x+box.width*0.5,box.y+box.height*0.5);
+        await page.waitForSelector('#dt-tip:not([hidden])');assert((await page.locator('#dt-tip').innerText()).includes('EMA21'));
+        // live: harga tampil dan diperbarui tanpa menutup panel
+        assert.notEqual(await page.locator('[data-dv="price"]').innerText(),'—');
+        await common(page,viewport);
+        await page.keyboard.press('Escape');assert(await page.locator('#detail').isHidden());
+        // dari kartu Decision: status Decision + skor
+        await nav(page,viewport,'decision');await page.waitForSelector('#dec-list .dec-card');
+        const en=ACTIVE[0];await page.locator(`[data-dec="${en.key}"] [data-action="pair"]`).click();await page.waitForSelector(`[data-detail="${en.symbol}"]`);
+        assert.equal(await page.locator('[data-dv="status"]').innerText(),'Decision');assert(await page.locator('[data-dv="dec"]').count()>=1);
+        await page.locator('.detail [data-action="detail-close"]').first().click();assert(await page.locator('#detail').isHidden());
+        // dari Jurnal
+        await nav(page,viewport,'jurnal');await page.waitForSelector('tr[data-jrow]');
+        const js=await page.locator('tr[data-jrow] [data-action="pair"]').first().getAttribute('data-sym');
+        await page.locator('tr[data-jrow] [data-action="pair"]').first().click();await page.waitForSelector(`[data-detail="${js}"]`);
+        await page.keyboard.press('Escape');await nav(page,viewport,'decision');await page.waitForSelector('#dec-list .dec-card');
       });
       await run(`[${viewport.width}px] Semua Pair: universe realtime, stablecoin/non-TRADING tersaring, M1 = engine, filter & urut`,async()=>{
         await nav(page,viewport,'pairs');await page.waitForSelector('#pairs-body tr[data-pair]');
