@@ -1,0 +1,29 @@
+name: Ambil data uji lanjutan (1h, 15m, OI, likuidasi)
+on:
+  push:
+    branches: [ambil-bt2]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  ambil:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node scripts/backtest/fetch-extended.js
+      - name: Simpan ke cabang data-bt2
+        if: always()
+        run: |
+          test -f data/bt2/coverage.json || exit 1
+          mkdir /tmp/bt2 && cp -r data/bt2/* /tmp/bt2/ && rm -rf /tmp/bt2/_tmp
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan data-bt2
+          git rm -rf -q . && rm -rf data
+          mkdir -p data/bt2 && cp -r /tmp/bt2/* data/bt2/
+          git add data && git commit -q -m "Data uji lanjutan: kline 1h/15m, funding, metrics OI, likuidasi (data.binance.vision)"
+          git push -f origin data-bt2
