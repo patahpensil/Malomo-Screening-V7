@@ -1,0 +1,245 @@
+{
+ "generated": "2026-10-27T17:54:14.137Z",
+ "symbols": {
+  "BTCUSDT": {
+   "kline1h": 59784,
+   "kline15m": 98880,
+   "funding": 7395,
+   "metrics": 42973,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "ETHUSDT": {
+   "kline1h": 59784,
+   "kline15m": 98880,
+   "funding": 7395,
+   "metrics": 42973,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "SOLUSDT": {
+   "kline1h": 53489,
+   "kline15m": 98880,
+   "funding": 6700,
+   "metrics": 42971,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "XRPUSDT": {
+   "kline1h": 59536,
+   "kline15m": 98880,
+   "funding": 7379,
+   "metrics": 42973,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "DOGEUSDT": {
+   "kline1h": 55191,
+   "kline15m": 98880,
+   "funding": 6821,
+   "metrics": 42973,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "1000PEPEUSDT": {
+   "kline1h": 30488,
+   "kline15m": 98880,
+   "funding": 3733,
+   "metrics": 30477,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "BNBUSDT": {
+   "kline1h": 58816,
+   "kline15m": 98880,
+   "funding": 7274,
+   "metrics": 42973,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "SUIUSDT": {
+   "kline1h": 30536,
+   "kline15m": 98880,
+   "funding": 3739,
+   "metrics": 30501,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "ADAUSDT": {
+   "kline1h": 59056,
+   "kline15m": 98880,
+   "funding": 7339,
+   "metrics": 42973,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "WIFUSDT": {
+   "kline1h": 24298,
+   "kline15m": 97191,
+   "funding": 5917,
+   "metrics": 24287,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "ENAUSDT": {
+   "kline1h": 22500,
+   "kline15m": 89998,
+   "funding": 5467,
+   "metrics": 22499,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "LINKUSDT": {
+   "kline1h": 59392,
+   "kline15m": 98880,
+   "funding": 7346,
+   "metrics": 42973,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "AVAXUSDT": {
+   "kline1h": 53393,
+   "kline15m": 98880,
+   "funding": 6598,
+   "metrics": 42966,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "WLDUSDT": {
+   "kline1h": 28572,
+   "kline15m": 98880,
+   "funding": 3493,
+   "metrics": 28537,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "TRUMPUSDT": {
+   "kline1h": 15515,
+   "kline15m": 62060,
+   "funding": 3721,
+   "metrics": 15515,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "HYPEUSDT": {
+   "kline1h": 12350,
+   "kline15m": 49398,
+   "funding": 2930,
+   "metrics": 12349,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "LTCUSDT": {
+   "kline1h": 59464,
+   "kline15m": 98880,
+   "funding": 7370,
+   "metrics": 42972,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "1000SHIBUSDT": {
+   "kline1h": 47887,
+   "kline15m": 98880,
+   "funding": 5908,
+   "metrics": 42973,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "NEARUSDT": {
+   "kline1h": 52744,
+   "kline15m": 98880,
+   "funding": 6532,
+   "metrics": 42949,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "ORDIUSDT": {
+   "kline1h": 26028,
+   "kline15m": 98880,
+   "funding": 6349,
+   "metrics": 26017,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "BCHUSDT": {
+   "kline1h": 59784,
+   "kline15m": 98880,
+   "funding": 7395,
+   "metrics": 42968,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "FILUSDT": {
+   "kline1h": 52722,
+   "kline15m": 98880,
+   "funding": 6527,
+   "metrics": 42973,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "1000BONKUSDT": {
+   "kline1h": 25666,
+   "kline15m": 98880,
+   "funding": 6259,
+   "metrics": 25655,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "FARTCOINUSDT": {
+   "kline1h": 16206,
+   "kline15m": 64821,
+   "funding": 3894,
+   "metrics": 16205,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "UNIUSDT": {
+   "kline1h": 53513,
+   "kline15m": 98880,
+   "funding": 6614,
+   "metrics": 42972,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "AAVEUSDT": {
+   "kline1h": 52841,
+   "kline15m": 98880,
+   "funding": 6527,
+   "metrics": 42973,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "ARBUSDT": {
+   "kline1h": 31521,
+   "kline15m": 98880,
+   "funding": 3863,
+   "metrics": 31510,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "NEIROUSDT": {
+   "kline1h": 18493,
+   "kline15m": 73970,
+   "funding": 4466,
+   "metrics": 18492,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "DOTUSDT": {
+   "kline1h": 54161,
+   "kline15m": 98880,
+   "funding": 6698,
+   "metrics": 42973,
+   "liqHours": 0,
+   "liqDays": 0
+  },
+  "TIAUSDT": {
+   "kline1h": 26190,
+   "kline15m": 98880,
+   "funding": 6390,
+   "metrics": 26179,
+   "liqHours": 0,
+   "liqDays": 0
+  }
+ }
+}
